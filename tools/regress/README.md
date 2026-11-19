@@ -36,3 +36,7 @@ py -3.13 -I tools/regress/compare_runs.py <work>\baseline <work>\run-new
 `--pairs`、`--config` 也可以用環境變數 `IAT_REGRESS_PAIRS`、`IAT_REGRESS_CONFIG` 指定；`gen_pairs.py` 的樣本資料夾可用 `--samples` 或 `IAT_REGRESS_SAMPLES` 覆寫。
 
 基準資料（先前保存的 `run_cases.py` 輸出）與對照組都不放進 repo。`full_paths` 與幾個參數錯誤案例的輸出會帶有對照組或案例資料夾的完整路徑；基準若是在別的位置產生後才搬移，用 `--path-map <基準當時的路徑> <這次的路徑>` 把兩邊的同一資料夾換成同一個代號（可重複指定，例如對照組資料夾與執行結果資料夾各一組）。`compare_runs.py` 全部一致時退出碼為 0，否則為 1 並列出差異的案例與欄位。
+
+`--path-map` 的第一個路徑是基準**產生當時**記錄在輸出裡的路徑，不是基準目前所在的位置；基準資料夾之後再搬移，這個值不變，只有這次的路徑（第二個）要跟著調整。
+
+對照組必須和基準一起保存。`gen_pairs.py` 重新產生的 PNG 帶有 ImageMagick 寫入的產生時間（tIME 與 `date:create`、`date:modify`、`date:timestamp`），雜湊與時間 metadata 都會不同，不能拿來和舊基準比對；遺失對照組時，要用新的對照組重新建立基準。
