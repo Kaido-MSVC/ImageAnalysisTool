@@ -1,0 +1,21 @@
+{
+  "name": "image-analysis-tool",
+  "version-string": "0.0.0",
+  "builtin-baseline": "1460b31b08c42cc2e9ac2c79f45ec8707e2675e2",
+  "dependencies": [
+    { "name": "libpng", "default-features": false },
+    { "name": "tiff", "default-features": false, "features": [ "zip" ] },
+    { "name": "libjxl", "default-features": false },
+    { "name": "libwebp", "default-features": false, "features": [ "simd" ] },
+    { "name": "libavif", "default-features": false, "features": [ "aom" ] },
+    "nlohmann-json",
+    "doctest"
+  ],
+  "overrides": [
+    { "name": "libpng", "version": "1.6.59", "port-version": 1 },
+    { "name": "tiff", "version": "4.7.2" },
+    { "name": "libjxl", "version": "0.12.0", "port-version": 1 },
+    { "name": "libwebp", "version": "1.6.0", "port-version": 2 },
+    { "name": "aom", "version": "3.15.2" }
+  ]
+}

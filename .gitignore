@@ -1,0 +1,17 @@
+/build/
+/.vs/
+/.vscode/
+/out/
+/dist/
+*.user
+CMakeUserPresets.json
+__pycache__/
+/tests/fixtures/generated/
+
+# Local-only material: private sample images, regression-run configuration and
+# machine-specific notes. Never commit or upload, even if a copy or link ends up
+# inside the repository.
+/local-samples/
+/tools/regress/*.local.json
+/CLAUDE.md
+/.claude/

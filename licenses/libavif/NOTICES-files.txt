@@ -1,0 +1,57 @@
+Per-file notices in libavif 1.4.2#1 source files that are linked into the executables
+and name copyright holders not listed in LICENSE.txt. Copied verbatim from the
+source archive (SHA-512 cbf31827884058acc54d3b1fa0f2059f022691609a76e0f913981d5b8c1be60f52069a25b61c888c09e963161d1f4c9bf692c0716ab0ee067a4ccaa4e36d9ce1).
+
+--- src/colrconvert.c ---
+// Copyright 2023 Google LLC
+// SPDX-License-Identifier: BSD-2-Clause
+
+
+--- src/exif.c ---
+// Copyright 2022 Google LLC
+// SPDX-License-Identifier: BSD-2-Clause
+
+
+--- src/gainmap.c ---
+// Copyright 2023 Google LLC
+// SPDX-License-Identifier: BSD-2-Clause
+
+
+--- src/obu.c ---
+/*
+ * Copyright © 2018, VideoLAN and dav1d authors
+ * Copyright © 2018, Two Orioles, LLC
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright notice, this
+ *    list of conditions and the following disclaimer.
+ *
+ * 2. Redistributions in binary form must reproduce the above copyright notice,
+ *    this list of conditions and the following disclaimer in the documentation
+ *    and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
+ * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+--- src/properties.c ---
+// Copyright 2024 Brad Hards. All rights reserved.
+// SPDX-License-Identifier: BSD-2-Clause
+
+
+--- src/sampletransform.c ---
+// Copyright 2024 Google LLC
+// SPDX-License-Identifier: BSD-2-Clause
+
+

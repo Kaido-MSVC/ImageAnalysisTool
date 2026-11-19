@@ -1,0 +1,13 @@
+* text=auto
+
+# Test images and other exact-byte files must never pass through EOL conversion.
+*.png binary
+*.tif binary
+*.tiff binary
+*.jxl binary
+*.webp binary
+*.jpg binary
+*.avif binary
+*.icc binary
+*.psd binary
+*.psb binary

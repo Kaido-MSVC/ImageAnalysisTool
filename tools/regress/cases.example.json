@@ -1,0 +1,19 @@
+{
+  "samples_dir": "C:/path/to/local-samples",
+  "pairs": {
+    "crop_source": "large-photo.png",
+    "psd_references": ["layered-a.psb", "layered-b.psd"]
+  },
+  "cases": [
+    { "name": "sample_jpg_vs_webp", "shape": "full", "args": ["compare", "{S}/photo.jpg", "{S}/photo.webp"] },
+    { "name": "sample_inspect_webp", "shape": "full", "args": ["inspect", "{S}/photo.webp"] },
+    { "name": "sample_inspect_clip", "shape": "full", "args": ["inspect", "{S}/drawing.clip"] },
+    { "name": "sample_psb_vs_magick_png", "shape": "imbc", "args": ["{S}/layered-a.psb", "{P}/layered-a.psb.imbc-magick.png"] },
+    { "name": "sample_psd_vs_magick_png", "shape": "imbc", "args": ["{S}/layered-b.psd", "{P}/layered-b.psd.imbc-magick.png"] }
+  ],
+  "inspect_all": {
+    "name_prefix": "sample_inspect_",
+    "extensions": [".psd", ".psb", ".png"],
+    "extra_args": ["--limits", "job_commit_mib=4096", "buffer_mib=256"]
+  }
+}
