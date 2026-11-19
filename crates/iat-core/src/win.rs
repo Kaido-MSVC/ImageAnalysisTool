@@ -1,4 +1,4 @@
-//! Win32 包裝。這是 iat-core 裡唯一允許 unsafe 的模組（rav1d 包裝之外），理由見
+//! Win32 包裝。這是 iat-core 裡唯一允許 unsafe 的模組（AV1 包裝在獨立的 iat-av1 crate），理由見
 //! docs/decisions.md D-R03：英文系統錯誤訊息、檔案識別碼、不取代既有檔的改名、
 //! 系統亂數與主控台中斷處理，std 都沒有提供安全且行為相同的介面。
 //!
@@ -17,7 +17,7 @@ use windows_sys::Win32::Foundation::{ERROR_SHARING_VIOLATION, GetLastError};
 use windows_sys::Win32::Globalization::{CSTR_EQUAL, CompareStringOrdinal};
 use windows_sys::Win32::Security::Cryptography::{BCRYPT_USE_SYSTEM_PREFERRED_RNG, BCryptGenRandom};
 use windows_sys::Win32::Storage::FileSystem::{
-    FILE_ID_INFO, FileIdInfo, GetDiskFreeSpaceExW, GetFileAttributesW, GetFileInformationByHandleEx,
+    FILE_ID_128, FILE_ID_INFO, FileIdInfo, GetDiskFreeSpaceExW, GetFileAttributesW, GetFileInformationByHandleEx,
     INVALID_FILE_ATTRIBUTES, MOVEFILE_WRITE_THROUGH, MoveFileExW,
 };
 use windows_sys::Win32::System::Console::{CTRL_BREAK_EVENT, CTRL_C_EVENT, CTRL_CLOSE_EVENT, SetConsoleCtrlHandler};
@@ -56,7 +56,7 @@ pub fn os_code(e: &std::io::Error) -> u32 {
 
 /// 磁碟區序號加 128 位元檔案 ID；硬連結與同一檔案的不同路徑會得到相同值。
 pub fn file_identity(f: &File) -> Option<(u64, [u8; 16])> {
-    let mut info = FILE_ID_INFO { VolumeSerialNumber: 0, FileId: unsafe { std::mem::zeroed() } };
+    let mut info = FILE_ID_INFO { VolumeSerialNumber: 0, FileId: FILE_ID_128 { Identifier: [0; 16] } };
     // SAFETY: handle 來自仍開啟的 File；info 的大小與 FileIdInfo 類別相符。
     let ok = unsafe {
         GetFileInformationByHandleEx(
@@ -116,7 +116,7 @@ pub fn random_16() -> [u8; 16] {
 
 static CTRL_FLAG: OnceLock<Arc<AtomicBool>> = OnceLock::new();
 
-unsafe extern "system" fn on_ctrl(kind: u32) -> i32 {
+extern "system" fn on_ctrl(kind: u32) -> i32 {
     if kind == CTRL_C_EVENT || kind == CTRL_BREAK_EVENT || kind == CTRL_CLOSE_EVENT {
         if let Some(f) = CTRL_FLAG.get() {
             f.store(true, Ordering::SeqCst);

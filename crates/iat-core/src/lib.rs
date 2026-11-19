@@ -3,6 +3,9 @@
 //!
 //! 對照組是 C++ 版 iat 1.0.0；判定與 JSON 契約見 `docs/plan.md` 與 C++ 版
 //! `docs/cli-json-contract.md`，和 C++ 版不同的地方記在 `docs/decisions.md`。
+//!
+//! unsafe 只允許出現在 `win` 模組（D-R03）；AV1 的 unsafe 包裝放在獨立的 iat-av1 crate。
+#![deny(unsafe_code)]
 
 pub mod engine;
 pub mod exit;
