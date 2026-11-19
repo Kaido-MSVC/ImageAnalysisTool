@@ -43,6 +43,9 @@ ap.add_argument("--fixtures", default=os.path.join(os.path.dirname(__file__), ".
 ap.add_argument("--allow", default=os.path.join(os.path.dirname(__file__), "..", "..", "docs", "decisions.md"))
 ap.add_argument("--only")
 ap.add_argument("--no-cancel", action="store_true", help="skip the Ctrl+Break during hashing case (needs a 16 GiB sparse file)")
+ap.add_argument("--accept", default="",
+                help="comma-separated formats of the current stage (e.g. png): cases whose files are all of these "
+                     "formats (or need no decoder) must match too")
 args = ap.parse_args()
 
 FIX = os.path.abspath(args.fixtures)
@@ -76,8 +79,14 @@ def load_allowed(path):
 ALLOWED = load_allowed(os.path.abspath(args.allow))
 
 
+def _pat(p):
+    """'[' is literal in the table (JSON paths use issues[3]); only * and ? are wildcards."""
+    return p.replace("[", "[[]")
+
+
 def allowed(case, field):
-    return next((r for r in ALLOWED if fnmatch.fnmatchcase(case, r[0]) and fnmatch.fnmatchcase(field, r[1])), None)
+    return next((r for r in ALLOWED
+                 if fnmatch.fnmatchcase(case, _pat(r[0])) and fnmatch.fnmatchcase(field, _pat(r[1]))), None)
 
 
 # ------------------------------------------------------------------ cases
@@ -267,6 +276,20 @@ def json_of(res):
     return raw.decode("utf-8") if raw is not None else None
 
 
+def tolerate_md(lines, diffs, c):
+    """Rust Markdown with allowed JSON string differences put back to the C++ value, so a difference
+    already allowed in the JSON (e.g. decode_path) does not hide every later Markdown line."""
+    subs = sorted({rv: cv for f, cv, rv in diffs
+                   if allowed(c.name, f) and isinstance(cv, str) and isinstance(rv, str) and len(rv) >= 4
+                   and rv != cv}.items(), key=lambda s: -len(s[0]))
+    out = []
+    for line in lines:
+        for rv, cv in subs:
+            line = line.replace(rv, cv)
+        out.append(line)
+    return out
+
+
 def compare(c, a, b):
     """List of (field, cpp value, rust value)."""
     diffs = []
@@ -295,7 +318,7 @@ def compare(c, a, b):
         diffs.append(("markdown", "present" if ma else "absent", "present" if mb else "absent"))
     elif ma is not None:
         la = mask_md(mask_text(ma, a["dir"])).split("\n")
-        lb = mask_md(mask_text(mb, b["dir"])).split("\n")
+        lb = tolerate_md(mask_md(mask_text(mb, b["dir"])).split("\n"), diffs, c)
         if la != lb:
             i = next((k for k, (x, y) in enumerate(zip(la, lb)) if x != y), min(len(la), len(lb)))
             diffs.append(("markdown", "line %d: %s" % (i, la[i] if i < len(la) else "<end>"),
@@ -316,6 +339,19 @@ def decode_free(a):
     return all(f.get("format", "") in ("", "unknown", "jpeg") for f in files)
 
 
+ACCEPT = {f.strip() for f in args.accept.split(",") if f.strip()}
+
+
+def stage_case(a):
+    """Every file is of a format the current stage supports (or needs no decoder)."""
+    j = json_of(a)
+    if j is None or not ACCEPT:
+        return False
+    j = json.loads(j)
+    files = [j["original"]] + ([j["output"]] if j.get("output") else [])
+    return all(f.get("format", "") in ACCEPT | {"", "unknown", "jpeg"} for f in files)
+
+
 # ------------------------------------------------------------------ main
 rows = []
 for c in cases:
@@ -323,32 +359,38 @@ for c in cases:
     diffs = compare(c, a, b)
     unallowed = [d for d in diffs if not allowed(c.name, d[0])]
     status = "SAME" if not diffs else ("ALLOWED" if not unallowed else "DIFF")
-    rows.append((c.name, decode_free(a), status, diffs, unallowed))
+    free = decode_free(a)
+    kind = "free" if free else ("stage" if stage_case(a) else "other")
+    rows.append((c.name, kind, status, diffs, unallowed))
 
-df = [r for r in rows if r[1]]
-other = [r for r in rows if not r[1]]
+KIND = {"free": "不需解碼", "stage": "本階段", "other": "其他格式"}
+gated = [r for r in rows if r[1] in ("free", "stage")]
+other = [r for r in rows if r[1] == "other"]
 lines = ["# C++ iat 對 Rust iat 比對結果", "",
-         "- C++：`%s`" % SIDES["cpp"], "- Rust：`%s`" % SIDES["rust"], "",
-         "| 案例 | 不需解碼 | 結果 | 差異欄位 |", "|---|---|---|---|"]
-for name, free, status, diffs, unallowed in df + other:
+         "- C++：`%s`" % SIDES["cpp"], "- Rust：`%s`" % SIDES["rust"],
+         "- 本階段格式：%s" % (", ".join(sorted(ACCEPT)) or "（無）"), "",
+         "| 案例 | 類別 | 結果 | 差異欄位 |", "|---|---|---|---|"]
+for name, kind, status, diffs, unallowed in gated + other:
     fields = ", ".join(("%s%s" % (d[0], "" if d in unallowed else "（允許）")) for d in diffs[:8])
     if len(diffs) > 8:
         fields += " …（共 %d 項）" % len(diffs)
-    lines.append("| %s | %s | %s | %s |" % (name, "是" if free else "否", status, fields))
-lines += ["", "## 不需解碼案例的差異明細", ""]
-for name, free, status, diffs, unallowed in df:
+    lines.append("| %s | %s | %s | %s |" % (name, KIND[kind], status, fields))
+lines += ["", "## 驗收案例（不需解碼與本階段）的差異明細", ""]
+for name, kind, status, diffs, unallowed in gated:
     for d in diffs:
         lines.append("- `%s` `%s`%s：C++ `%.200r` / Rust `%.200r`" % (
             name, d[0], "（允許：%s）" % allowed(name, d[0])[2] if d not in unallowed else "", d[1], d[2]))
 with open(os.path.join(OUT, "diff-table.md"), "w", encoding="utf-8") as f:
     f.write("\n".join(lines) + "\n")
 
-for name, free, status, diffs, unallowed in df:
-    print("%-8s %-44s %s" % (status, name, ", ".join(d[0] for d in diffs)))
+for name, kind, status, diffs, unallowed in gated:
+    print("%-8s %-6s %-44s %s" % (status, kind, name, ", ".join(d[0] for d in diffs)))
     for d in unallowed:
         print("    %s\n      C++ : %.300r\n      Rust: %.300r" % d)
 same = lambda rs: sum(1 for r in rs if r[2] != "DIFF")
-print("\ndecode-free cases: %d, matching: %d (allowed differences included)" % (len(df), same(df)))
-print("cases needing a decoder (informational in stage 0): %d, matching: %d" % (len(other), same(other)))
+for k in ("free", "stage"):
+    rs = [r for r in gated if r[1] == k]
+    print("\n%s cases: %d, matching: %d (allowed differences included)" % (k, len(rs), same(rs)), end="")
+print("\nother cases (informational): %d, matching: %d" % (len(other), same(other)))
 print("diff table: %s" % os.path.join(OUT, "diff-table.md"))
-sys.exit(0 if same(df) == len(df) else 1)
+sys.exit(0 if same(gated) == len(gated) else 1)

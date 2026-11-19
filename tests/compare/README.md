@@ -6,12 +6,13 @@
 cargo build --release
 py -3.13 -I tests\compare\compare_iat.py `
   --cpp D:\projects\ImageAnalysisTool\dist\ImageAnalysisTool-1.0.0-win-x64\iat.exe `
-  --rust target\release\iat.exe --out out\compare
+  --rust target\release\iat.exe --out out\compare --accept png
 ```
 
 - 案例：`tests/fixtures/generated/pairs.json` 的 pairs／singles，加上 C++ 版 `run_e2e.py` 裡不需要解碼器的參數、報告目標安全性、I/O 與取消案例。
 - 比對前去掉：`run_id`、`tool`（名稱、版本、編譯器）、`codecs`、`metrics`、`settings.temp.free_bytes_at_start`；文字裡的 run id 與各側的案例目錄也遮罩。
 - 允許的差異只看 `docs/decisions.md`「允許的差異」表格；表格以外的差異一律失敗。
-- 結果表寫在 `<out>/diff-table.md`。退出碼 0 表示所有「不需解碼」案例一致（階段 0 驗收）。
+- 結果表寫在 `<out>/diff-table.md`。退出碼 0 表示所有「不需解碼」案例，以及 `--accept` 指定格式的「本階段」案例都一致（允許差異算一致）。階段 1 用 `--accept png`；其他格式的案例只列出供參考。
+- 允許差異表的欄位樣式中 `[` 是字面字元，只有 `*`、`?` 是萬用字元；已允許的 JSON 字串差異在 Markdown 比對前會換回 C++ 版的值（D-R08）。
 - `--only <regex>` 只跑名稱符合的案例；`--no-cancel` 跳過需要 16 GiB 稀疏檔的取消案例。
 - 用到硬連結，`--out` 建議放在 NTFS 磁碟上。
