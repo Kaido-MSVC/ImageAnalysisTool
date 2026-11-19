@@ -1,0 +1,17 @@
+# 和 C++ 版 iat 比對
+
+`compare_iat.py`（只用標準函式庫）用同一組案例分別執行 C++ 版基準 `iat.exe` 與 Rust 版，比對退出碼、stderr、JSON 報告（含版面）與 Markdown 報告。
+
+```powershell
+cargo build --release
+py -3.13 -I tests\compare\compare_iat.py `
+  --cpp D:\projects\ImageAnalysisTool\dist\ImageAnalysisTool-1.0.0-win-x64\iat.exe `
+  --rust target\release\iat.exe --out out\compare
+```
+
+- 案例：`tests/fixtures/generated/pairs.json` 的 pairs／singles，加上 C++ 版 `run_e2e.py` 裡不需要解碼器的參數、報告目標安全性、I/O 與取消案例。
+- 比對前去掉：`run_id`、`tool`（名稱、版本、編譯器）、`codecs`、`metrics`、`settings.temp.free_bytes_at_start`；文字裡的 run id 與各側的案例目錄也遮罩。
+- 允許的差異只看 `docs/decisions.md`「允許的差異」表格；表格以外的差異一律失敗。
+- 結果表寫在 `<out>/diff-table.md`。退出碼 0 表示所有「不需解碼」案例一致（階段 0 驗收）。
+- `--only <regex>` 只跑名稱符合的案例；`--no-cancel` 跳過需要 16 GiB 稀疏檔的取消案例。
+- 用到硬連結，`--out` 建議放在 NTFS 磁碟上。
