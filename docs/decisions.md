@@ -64,6 +64,13 @@ C++ 版每次分析都建立兩個 delete-on-close 暫存檔，並清理舊的 `
 
 `settings.temp.location` 照 C++ 版的行為：開檔失敗或雜湊時被取消，即使指定 `--temp-dir` 也記為 `system_temp`。
 
+**階段 1 補上（2026-11-20）**，行為與 C++ 版 `create_temp` 相同（`crates/iat-core/src/temp.rs`）：
+
+- 每次執行在暫存目錄建立 `iat-tmp-<run id>-a.bin`／`-b.bin`：CREATE_NEW、不共用、`FILE_ATTRIBUTE_TEMPORARY | NOT_CONTENT_INDEXED`、`FILE_FLAG_DELETE_ON_CLOSE`。建立前先刪除符合 `iat-tmp-<UUID>-a/b.bin` 形狀的舊檔（`temp_stale_removed`）；引擎結束、關閉 handle 後仍存在的檔案記為 `temp_cleanup_failed`。
+- 配額（`temp_gib`）與剩餘空間（保留 64 MiB）在解碼前一次預留；附加模式只能讀回已寫到磁碟的範圍。
+- 與 C++ 版唯一的差別：預先配置用 `File::set_len`，C++ 版用 `SetFileInformationByHandle(FileAllocationInfo)`（不改檔案長度）。用 std 就不需要新的 unsafe；讀取範圍一律以已寫入的長度檢查，`set_len` 補的 0 不會被讀到。
+- 目前只有 PNG Adam7 用到暫存（每側一個檔，整張正規影像以 pass 順序附加寫入，再逐列重建）。
+
 ### D-R05 不支援格式的訊息沿用 C++ 版文字（2026-11-19）
 
 `unknown_format` 的訊息是 `format 'unknown' is not supported by this build (PNG, TIFF/BigTIFF, WebP, JPEG XL, PSD/PSB, AVIF)`。括號內是 C++ 版 1.0.0 的支援範圍，也是 Rust 版的最終目標，所以照抄，讓 `inspect_unknown_format` 一致。階段 0 實際上還不能解碼任何格式：辨識得出的格式一律為 `decode_status=unsupported`、`decode_status_reason=format_not_supported_in_this_build`，問題代碼 `unsupported_sample_model`（與 C++ 版遇到 JPEG 時相同）。
@@ -81,6 +88,12 @@ C++ 版每次分析都建立兩個 delete-on-close 暫存檔，並清理舊的 `
 ### D-R08 比對腳本的遮罩範圍（2026-11-19）
 
 `tests/compare/compare_iat.py` 比對前去掉 `run_id`、`tool`、`codecs`、`metrics`、`settings.temp.free_bytes_at_start`，文字中遮罩 run id 與各側的案例目錄，Markdown 去掉「工具」那一行與「效能與資源」整節。C++ 版 `compare_runs.py` 只比 `metrics` 的鍵；因為 D-R02，Rust 版的鍵必然不同，所以改成整個不比。
+
+**階段 1 增補（2026-11-20）**：
+
+- `--accept <格式,...>`：本階段的格式。所有檔案都是這些格式（或不需解碼）的案例也列入驗收，退出碼 0 表示「不需解碼」與「本階段」兩類案例全部一致。階段 1 用 `--accept png`。
+- 允許差異表的欄位樣式中，`[` 一律當成字面字元（JSON 路徑本身就有 `issues[3]`），只有 `*`、`?` 是萬用字元。
+- Markdown 比對前，把 Rust 版 Markdown 中「已允許的 JSON 字串差異」換回 C++ 版的值。否則像 `decode_path` 這種每個 PNG 案例都有的允許差異，會讓 Markdown 只能整份允許，後面的行就都沒比到。只換長度至少 4 的字串值。
 
 ### 階段 0 決定的審核（2026-11-20）
 
@@ -119,9 +132,83 @@ D-R04、D-R05、D-R07，以及階段 0 的其他增補（D-R01、D-R06、D-R08�
 - worker：見 D-R02 第二次修訂，階段 6 起產出獨立的 `iat-worker.exe`，和 `iat.exe` 放在同一個資料夾。
 - 在那之前（階段 1～5），IMB-C 不能直接使用 Rust 版；比對只靠 `tests/compare`。
 
+### D-R11 PNG 解碼：png crate 只解 IDAT，其餘由 png_scan 決定（2026-11-20，階段 1）
+
+第 2 步驗證（2026-11-20）：png 0.18.1 以 `Transformations::IDENTITY` 交出未經轉換的列。有 `.truth` 的 11 張 PNG 逐值相同；7 組 Adam7 與對應的非交錯圖逐值相同；16-bit 為大端序原值，1/2/4-bit 與調色盤索引不展開，tRNS 不套用。展開規則照 C++ 版 `expand_row` 自己做。
+
+實作方式（`crates/iat-core/src/png_side.rs`、`png_scan.rs`）：
+
+- **只餵關鍵 chunk**：png crate 只收到簽章、IHDR、PLTE（僅調色盤影像）、全部 IDAT、IEND，以及掃描停下處之後的原始位元組（例如截斷或 CRC 錯誤的 IDAT）。輔助 chunk 的語意、PLTE 與 tRNS 的值都來自 png_scan。原因：png crate 的 `Info.trns` 在位深低於 16 時只留低位元組（libpng 保留完整 16 bit）；它對重複或位置錯誤的輔助 chunk 也比 libpng 嚴格（直接錯誤，libpng 只警告）。
+- **Adler-32 由 png_scan 檢查**：使用者指示 `set_ignore_adler32(false)`，實作改為 `true`，IDAT 的 Adler-32 由 png_scan 另外完整解壓一次來驗證（不保留資料）。原因：png crate 自己檢查時，小圖會在交出第一列之前就失敗（`adler32_error_output` 會變成 `rows_decoded` 0、`failed`）；libpng 則是解完前面的列，在最後一列失敗（`rows_decoded` 2、`partial`）。Adler-32 錯誤仍然一律偵測到，判定與 C++ 版相同；代價是 IDAT 多解壓一次。`set_skip_ancillary_crc_failures(false)` 照指示設定（只餵關鍵 chunk，所以實際上不起作用）。
+- **libpng 的失敗位置**：依 libpng 1.6.59 的讀取方式，由掃描結果決定。
+  - 最後一個 IDAT 的 CRC 錯誤與 Adler-32 不符，是在最後一列的 `png_read_row`（`png_read_finish_IDAT`）中發現，所以算成最後一列失敗。
+  - libpng 以 8192 bytes 為單位讀 IDAT，截斷的 IDAT 只交出完整的 8192 區塊。
+  - IDAT 之後的錯誤（缺 IEND、後面 chunk 的 CRC 或截斷）算成 `after_image_data`。
+  - 第一個 IDAT 之前的錯誤算成 `png_read_info` 失敗（`failed`／`header`）。
+- **`decode_path`** 改名為 `png-rows-no-transform`、`png-adam7-passes-no-transform+temp`（允許差異）。`codecs` 為 `{"png": "0.18.1"}`（不比對）。
+- 解碼失敗的問題訊息字首是 `png decoder at …`／`png decoder after image data: …`（C++ 版是 `libpng …`）；`decoder_errors` 是 png crate 或相容檢查的訊息。兩者都列在允許差異。
+
+新增的直接依賴：png 0.18.1、miniz_oxide 0.8.9（png 已經間接使用；iCCP／zTXt／iTXt 與 IDAT 串流檢查要區分 Adler-32 不符、資料損壞與截斷）、crc32fast 1.5.5（chunk CRC）。
+
+### D-R12 libpng 相容檢查（2026-11-20，階段 1）
+
+C++ 版有些問題代碼來自 libpng 的警告：`metadata_parse_failed`（警告含 zTXt／iTXt／iCCP／tEXt）、`decoder_warning`（其他警告）、`icc_rejected_by_decoder`（libpng 沒有採用 iCCP）。依使用者指示，png_scan 自己解壓 zTXt／iCCP，做 libpng 1.6.59 同樣的檢查來產生這些代碼。依據是 C++ 版建置用的原始碼（`build/release/vcpkg_installed/.../libpng/src/v1.6.59-*/pngrutil.c`、`png.c`）與其 `pnglibconf.h`。
+
+**有重做的**：
+- `png_handle_chunk` 的位置規則（`out of place`）、`duplicate`、`too short`、`too long`，以及 `length exceeds libpng limit`（`png_chunk_max` = C++ 版設定的 `metadata_item_bytes`）。
+- 未知的關鍵 chunk 一律是錯誤。
+- 文字 chunk 快取上限 1000（`no space in chunk cache`）。
+- tEXt／zTXt／iTXt 的關鍵字、截斷、壓縮方法、解壓失敗與 `extra compressed data`；`png_read_buffer` 超過上限時的 `out of memory`。
+- iCCP：
+  - 長度與關鍵字、壓縮方法；
+  - `png_icc_check_length`／`check_header`／`check_tag_table`，包括只發警告的項目；
+  - libpng 只解壓到 profile 長度，之後的 Adler-32 不檢查；
+  - 剩下未讀的壓縮資料只發警告。
+- eXIf 的開頭檢查（`invalid`）。
+- PLTE：
+  - 重複、位置、灰階影像的 PLTE、長度；
+  - 調色盤影像上的錯誤是 libpng 的致命錯誤；
+  - 調色盤截到 2^bit_depth 筆。
+- tRNS：
+  - 長度、位置、帶 alpha 的影像；
+  - 被拒收的 tRNS 不套用，像素一律不透明。
+- IDAT 收尾的 `Extra compressed data`、`Too much image data`、非連續 IDAT 的 `Too many IDATs found`。
+- 最多記錄 32 個警告，每個截到 159 字元，同 C++ 版 png_shim。
+
+警告的時機同 libpng：IDAT 之前的 chunk 一定記錄；IDAT 收尾的警告在讀到最後一列時記錄；IDAT 之後的在 `png_read_end` 有執行時才記錄。
+
+**沒有重做的**（目前的測試圖都沒有用到，遇到時 Rust 版不會發出 libpng 的那個警告）：
+- cHRM、gAMA、sRGB、sBIT、cICP、mDCV、cLLI、bKGD、hIST、pHYs、tIME、sPLT、oFFs、pCAL、sCAL 的內容檢查（長度與位置規則有做）。
+- iCCP 是否為已知的 sRGB profile（libpng 的 `png_icc_set_sRGB` 警告）。
+- 超過 64 MiB、無法讀進記憶體檢查的 iCCP，視為 libpng 會採用。
+- zlib 自己的錯誤文字（例如 `invalid distance too far back`）：Rust 版依錯誤種類回報 `damaged LZ stream`、`truncated`、`incorrect data check`。
+
+問題訊息的字首是 `libpng-compatible check: `（C++ 版是 `libpng: `），後面的文字相同。這些警告不寫進 `decoder_warnings`，因為它們不是解碼器產生的；兩者都列在允許差異。
+
 ## 允許的差異
 
 比對腳本讀這張表；表格以外的差異一律算失敗。欄位為 JSON 的點路徑，或 `exit`、`stderr`、`markdown`；可用 `*` 萬用字元。
 
 | 案例 | 欄位 | 原因 |
 |---|---|---|
+| * | *.decode_path | 解碼器名稱：Rust 版是 png crate（`png-rows-no-transform`、`png-adam7-passes-no-transform+temp`），C++ 版是 libpng（D-R11） |
+| truncated_output | issues[*].message | 解碼失敗訊息字首 `png decoder` 對 `libpng`，其餘文字相同（D-R11） |
+| crc_error_output | issues[*].message | 同上 |
+| missing_iend_output | issues[*].message | 同上 |
+| adler32_error_output | issues[*].message | 同上 |
+| ancillary_crc_after_idat_output | issues[*].message | 同上 |
+| adam7_truncated_output | issues[*].message | 同上 |
+| inspect_truncated | issues[*].message | 同上 |
+| inspect_adam7_truncated | issues[*].message | 同上 |
+| interlace_flag_without_adam7_data | issues[*].message | 濾波位元組錯誤的訊息是 png crate 的 `Unknown filter method 40.`，libpng 是 `bad adaptive filter value`；判定、失敗位置（Adam7 pass 2 第 0 列）相同（D-R11） |
+| interlace_flag_without_adam7_data | *.decoder_errors[*] | 同上 |
+| inspect_interlace_flag_only | issues[*].message | 同上 |
+| inspect_interlace_flag_only | *.decoder_errors[*] | 同上 |
+| broken_ztxt_output | issues[*].message | libpng 警告由相容檢查產生，字首 `libpng-compatible check:` 對 `libpng:`，其餘文字相同（D-R12） |
+| broken_ztxt_output | *.decoder_warnings* | 相容檢查的警告不寫進 `decoder_warnings`（D-R12） |
+| inspect_broken_ztxt | issues[*].message | 同 broken_ztxt_output |
+| inspect_broken_ztxt | *.decoder_warnings* | 同 broken_ztxt_output |
+| png_ztxt_broken_keyword_latin1 | issues[*].message | 同 broken_ztxt_output |
+| png_ztxt_broken_keyword_latin1 | *.decoder_warnings* | 同 broken_ztxt_output |
+| png_exif_over_limit_orientation_differs | issues[*].message | 同 broken_ztxt_output（`eXIf: length exceeds libpng limit`） |
+| png_exif_over_limit_orientation_differs | *.decoder_warnings* | 同 broken_ztxt_output |
