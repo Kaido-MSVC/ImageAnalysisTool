@@ -1,0 +1,2 @@
+# 測試圖與其清單以原始位元組保存：不做換行轉換，SHA-256 才會和 C++ repo 一致。
+tests/fixtures/** -text
