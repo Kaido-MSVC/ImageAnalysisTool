@@ -26,7 +26,9 @@ Other formats (JPEG, for example) are reported as unsupported. The format is det
 
 ## Download and install
 
-Extract `ImageAnalysisTool-<version>-win-x64.zip` to any folder. `iat.exe` and `iat-worker.exe` must stay in the same folder.
+Download the [v1.0.0 Windows x64 ZIP](https://github.com/Kaido-MSVC/ImageAnalysisTool/releases/download/v1.0.0/ImageAnalysisTool-1.0.0-win-x64.zip). Compare its SHA-256 with the value on the [v1.0.0 release page](https://github.com/Kaido-MSVC/ImageAnalysisTool/releases/tag/v1.0.0).
+
+Extract the ZIP to any folder. `iat.exe` and `iat-worker.exe` must stay in the same folder.
 
 Package contents: `iat.exe`, `iat-worker.exe`, `README.md`, `README.zh-TW.md`, `USAGE.md` (detailed usage, Traditional Chinese), `CHANGELOG.md`, `LICENSE.txt`, `THIRD_PARTY_NOTICES.txt`, `licenses/`, `SHA256SUMS.txt`.
 

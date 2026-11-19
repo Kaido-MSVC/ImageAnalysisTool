@@ -26,6 +26,8 @@
 
 ## 下載與安裝
 
+下載 [v1.0.0 Windows x64 ZIP](https://github.com/Kaido-MSVC/ImageAnalysisTool/releases/download/v1.0.0/ImageAnalysisTool-1.0.0-win-x64.zip)，並與 [v1.0.0 發行頁](https://github.com/Kaido-MSVC/ImageAnalysisTool/releases/tag/v1.0.0) 所列的 SHA-256 比對。
+
 把 `ImageAnalysisTool-<版本>-win-x64.zip` 解壓到任意資料夾。`iat.exe` 與 `iat-worker.exe` 必須在同一個資料夾。
 
 封包內容：`iat.exe`、`iat-worker.exe`、`README.md`（英文）、`README.zh-TW.md`、`USAGE.md`（詳細使用說明，繁體中文）、`CHANGELOG.md`、`LICENSE.txt`、`THIRD_PARTY_NOTICES.txt`、`licenses/`、`SHA256SUMS.txt`。
