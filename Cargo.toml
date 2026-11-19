@@ -1,0 +1,33 @@
+[workspace]
+resolver = "3"
+members = ["crates/iat-core", "crates/iat-cli", "crates/iat-gui"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.100"
+license = "MIT"
+authors = ["Kaido-MSVC"]
+publish = false
+
+# 版本變更要同步記在 docs/dependencies.md。
+[workspace.dependencies]
+iat-core = { path = "crates/iat-core" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sha2 = "0.11.1"
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_Globalization",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Console",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_Security_Cryptography",
+] }
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[profile.release]
+lto = true
+codegen-units = 1
