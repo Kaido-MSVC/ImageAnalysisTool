@@ -1,6 +1,6 @@
 //! 報告模型：欄位對應 C++ 版 `src/model/report.hpp` 與 `docs/cli-json-contract.md`（schema 1.1）。
 //!
-//! 狀態欄位維持字串，因為 JSON 契約本身就是字串列舉，而且問題代碼是開放集合
+//! 表示狀態的欄位維持字串，因為 JSON 契約本身就是字串列舉，而且問題代碼是開放集合
 //! （例如 `worker_stderr`、`temp_stale_removed`）。穩定代碼集中在 [`code`]。
 
 use std::collections::BTreeMap;
