@@ -31,11 +31,13 @@ C++ 版把解碼放在 `iat-worker.exe`，用 Job Object 套 `job_commit_mib` �
 
 **修訂（2026-11-20）**：階段 0～5 維持單一程序。階段 6 恢復 worker：
 
-- 做成同一個 `iat.exe` 的隱藏子命令（不另外出 `iat-worker.exe`），不出現在 `--help`。
+- ~~做成同一個 `iat.exe` 的隱藏子命令（不另外出 `iat-worker.exe`），不出現在 `--help`。~~ 已由第二次修訂取代。
 - 至少 AVIF 解碼要走 worker；其他格式是否也走 worker，階段 6 實作時再定並另記。
 - worker 放進 Job Object，負責 `job_commit_mib` 的作業系統層級記憶體上限（`job_commit_limit`、`webpbig_job_limit` 這類案例在那之前列為允許差異）。
 - worker 同時隔離 rav1d 的 unsafe：AV1 解碼的記憶體錯誤只會讓 worker 結束，主程序照 C++ 版回報 `worker_crashed` 等代碼。
 - 恢復後 `worker_*` 問題代碼會出現；`metrics` 的鍵仍不比（D-R08）。
+
+**第二次修訂（2026-11-20，因 D-R10）**：worker 改做成獨立的 bin crate `crates/iat-worker`，產出 `iat-worker.exe`，發布結構和 C++ 版相同（`iat.exe` 與 `iat-worker.exe` 放在同一個資料夾），不做成 `iat.exe` 的隱藏子命令。IMB-C 會檢查 `iat-worker.exe` 是否存在，這樣不用修改 IMB-C。
 
 ### D-R03 iat-core 的第二個 unsafe 例外：`win` 模組（2026-11-19）
 
@@ -109,7 +111,13 @@ D-R04、D-R05、D-R07，以及階段 0 的其他增補（D-R01、D-R06、D-R08�
 - 退出碼 5 時 IMB-C 讀 stderr；其他退出碼一律讀 `--report-json` 指定的報告，報告缺少上述欄位就視為工具錯誤。
 - 退出碼 4 時只依 `resource_need` 自動重試一次，`suggested_argument` 必須與 `--limits <name>=<value>` 完全相同。
 
-**未決（等使用者決定，未修改任何程式）**：項目 1、2 會讓 IMB-C 拒用 Rust 版，與規劃書階段 7「IMB-C 不改程式直接換用」衝突。可能的方向：版本號改成 ≥ 0.5.1 或在 `--version` 另行輸出、發布時附一個 `iat-worker.exe`（例如同一執行檔的複本或轉呼叫隱藏子命令的小程式）、或修改 IMB-C（違反唯讀規則與規劃書）。
+~~**未決**：項目 1、2 會讓 IMB-C 拒用 Rust 版，與規劃書階段 7「IMB-C 不改程式直接換用」衝突。~~
+
+**決定（2026-11-20）**，IMB-C 維持唯讀不改：
+
+- 版本號：實驗期間維持 `0.1.0`。階段 7 驗收時改為 `2.0.0`。不可用預發布版號，因為 IMB-C 要求輸出恰為 `iat X.Y.Z`。
+- worker：見 D-R02 第二次修訂，階段 6 起產出獨立的 `iat-worker.exe`，和 `iat.exe` 放在同一個資料夾。
+- 在那之前（階段 1～5），IMB-C 不能直接使用 Rust 版；比對只靠 `tests/compare`。
 
 ## 允許的差異
 
