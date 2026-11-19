@@ -2,7 +2,7 @@
 //! 對照 C++ 版 `src/core/run.cpp` 與 `src/core/report_io.cpp`。
 //!
 //! 與 C++ 版的主要差別：引擎在同一程序內執行，沒有 iat-worker.exe 與 Job Object
-//! （見 docs/decisions.md D-R02）。
+//! （見 docs/decisions.md D-R02）；取消與期限在引擎的列與列之間檢查。
 
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
@@ -12,12 +12,15 @@ use std::time::Instant;
 
 use sha2::{Digest, Sha256};
 
-use crate::engine::{AnalysisInput, analyze};
+use std::time::Duration;
+
+use crate::engine::{AnalysisInput, Outcome, analyze};
 use crate::exit::decide_exit;
 use crate::limits::Limits;
 use crate::paths::{file_name_of, full_path, is_directory, parent_dir_of, same_path, trim_dir};
 use crate::report::{Count, FileReport, Report, TestSettings, code};
 use crate::sniff::ext_format;
+use crate::temp::{self, RunTemp};
 use crate::{CancelToken, Mode, Progress, Stage, ms_since, win};
 
 const FILE_SHARE_READ: u32 = 0x1;
@@ -94,26 +97,33 @@ struct TempInfo {
     dir: Option<PathBuf>,
     user_specified: bool,
     free_bytes: u64,
+    stale_removed: u32,
+    files: Option<RunTemp>,
 }
 
-/// 暫存目錄是否可用與剩餘空間。階段 0 沒有解碼器需要暫存，所以不建立暫存檔，
-/// 也不清理舊的暫存檔（見 docs/decisions.md D-R04）。
-fn prepare_temp(req: &RunRequest) -> Result<TempInfo, (TempInfo, String)> {
+/// 暫存目錄、清掉舊的暫存檔、剩餘空間，再建立這次的兩個暫存檔（同 C++ 版 `create_temp`，D-R04）。
+fn prepare_temp(req: &RunRequest, run_id: &str) -> Result<TempInfo, Box<(TempInfo, String)>> {
     let user_specified = req.temp_dir.is_some();
     let dir = match &req.temp_dir {
         Some(d) => trim_dir(full_path(d)),
         None => trim_dir(std::env::temp_dir()),
     };
-    let mut t = TempInfo { dir: Some(dir.clone()), user_specified, free_bytes: 0 };
+    let mut t = TempInfo { dir: Some(dir.clone()), user_specified, free_bytes: 0, stale_removed: 0, files: None };
     if dir.as_os_str().is_empty() || !is_directory(&dir) {
         t.dir = None;
-        return Err((t, "temporary directory is not available".into()));
+        return Err(Box::new((t, "temporary directory is not available".into())));
     }
+    t.stale_removed = temp::remove_stale(&dir);
     match win::disk_free_bytes(&dir) {
         Ok(n) => t.free_bytes = n,
         Err(e) => {
-            return Err((t, format!("cannot query free space of the temporary directory: {}", win::error_text(e))));
+            let msg = format!("cannot query free space of the temporary directory: {}", win::error_text(e));
+            return Err(Box::new((t, msg)));
         }
+    }
+    match RunTemp::create(&dir, run_id) {
+        Ok(f) => t.files = Some(f),
+        Err(e) => return Err(Box::new((t, e))),
     }
     Ok(t)
 }
@@ -122,7 +132,6 @@ fn prepare_temp(req: &RunRequest) -> Result<TempInfo, (TempInfo, String)> {
 /// 報告的 exit 欄位已經判定好；這裡不寫報告檔。
 pub fn run_analysis(req: &RunRequest, cancel: &CancelToken, progress: &dyn Progress) -> Report {
     let t_all = Instant::now();
-    let compare = req.mode == Mode::Compare;
 
     let mut r = Report { run_id: new_run_id(), mode: req.mode.as_str().into(), ..Report::default() };
     r.tool.insert("name".into(), "iat".into());
@@ -201,13 +210,16 @@ pub fn run_analysis(req: &RunRequest, cancel: &CancelToken, progress: &dyn Progr
         );
     }
 
-    // ---- 暫存目錄（C++ 版只在要啟動 worker 時才準備，失敗時位置記為 system_temp）
-    let (temp, temp_err) = if open_failed || cancelled_early {
-        (TempInfo { dir: None, user_specified: false, free_bytes: 0 }, None)
+    // ---- 暫存目錄與暫存檔（C++ 版只在要啟動 worker 時才準備，失敗時位置記為 system_temp）
+    let (mut temp, temp_err) = if open_failed || cancelled_early {
+        (TempInfo { dir: None, user_specified: false, free_bytes: 0, stale_removed: 0, files: None }, None)
     } else {
-        match prepare_temp(req) {
+        match prepare_temp(req, &r.run_id) {
             Ok(t) => (t, None),
-            Err((t, e)) => (t, Some(e)),
+            Err(b) => {
+                let (t, e) = *b;
+                (t, Some(e))
+            }
         }
     };
     r.settings.temp.location = if temp.user_specified { "user_specified" } else { "system_temp" }.into();
@@ -215,6 +227,14 @@ pub fn run_analysis(req: &RunRequest, cancel: &CancelToken, progress: &dyn Progr
     r.settings.temp.delete_on_close = true;
     if req.full_paths {
         r.settings.temp.dir = temp.dir.as_ref().map(|d| d.to_string_lossy().into_owned());
+    }
+    if temp.stale_removed > 0 {
+        r.add_issue(
+            "temp_stale_removed",
+            "info",
+            "run",
+            format!("{} leftover temporary file(s) of an earlier run removed", temp.stale_removed),
+        );
     }
     if let Some(e) = &temp_err {
         set_not_checked(&mut r.original, "environment_error");
@@ -227,15 +247,52 @@ pub fn run_analysis(req: &RunRequest, cancel: &CancelToken, progress: &dyn Progr
     if !open_failed && !cancelled_early && temp_err.is_none() {
         let (Ok(fo), Some(Ok(_)) | None) = (&fo, &fp) else { unreachable!("open failures are handled above") };
         progress.report(Stage::Analyze, 0, 1);
+        let files = temp.files.as_ref().expect("temp files exist when there is no temp error");
+        let t_engine = Instant::now();
         let input = AnalysisInput {
             mode: req.mode,
             original: fo,
             output: fp.as_ref().and_then(|h| h.as_ref().ok()),
             limits: req.limits,
+            temp: [files.files[0].as_ref(), files.files[1].as_ref()],
+            temp_free_bytes: temp.free_bytes,
+            cancel,
+            deadline: t_engine + Duration::from_secs(req.limits.deadline_s),
         };
-        let t_engine = Instant::now();
-        let wr = analyze(&input);
+        let outcome = analyze(&input);
         r.metrics.time_ms.insert("engine_wall".into(), ms_since(t_engine));
+        // 引擎已結束：關閉 handle 就是最後一次關閉，暫存檔此時必須消失。
+        for left in temp.files.as_mut().map(RunTemp::close).unwrap_or_default() {
+            r.add_issue(
+                code::TEMP_CLEANUP_FAILED,
+                "warning",
+                "run",
+                format!("temporary file still exists after close: {}", file_name_of(&left)),
+            );
+        }
+        let wr = match outcome {
+            Outcome::Done(wr) => *wr,
+            Outcome::Cancelled | Outcome::Deadline => {
+                let cancelled = matches!(outcome, Outcome::Cancelled);
+                let reason = if cancelled { "cancelled" } else { "deadline" };
+                set_not_checked(&mut r.original, reason);
+                if let Some(o) = r.output.as_mut() {
+                    set_not_checked(o, reason);
+                }
+                if cancelled {
+                    r.add_issue(code::CANCELLED, "error", "run", "cancelled by user (Ctrl+C / Ctrl+Break)");
+                } else {
+                    let s = req.limits.deadline_s;
+                    r.add_issue(
+                        code::DEADLINE_EXCEEDED,
+                        "error",
+                        "run",
+                        format!("analysis exceeded deadline of {s} s (raise with --limits deadline_s=)"),
+                    );
+                }
+                return finish_report(req, r, t_all);
+            }
+        };
         // 身分欄位（檔名、大小、雜湊）與執行層級資料保留外層的值。
         let merge = |dst: &mut FileReport, mut src: FileReport| {
             src.name = std::mem::take(&mut dst.name);
@@ -263,7 +320,12 @@ pub fn run_analysis(req: &RunRequest, cancel: &CancelToken, progress: &dyn Progr
         r.metrics.timing_note = wr.metrics.timing_note;
         progress.report(Stage::Analyze, 1, 1);
     }
+    finish_report(req, r, t_all)
+}
 
+/// 副檔名檢查、大小補值與退出碼判定。
+fn finish_report(req: &RunRequest, mut r: Report, t_all: Instant) -> Report {
+    let compare = req.mode == Mode::Compare;
     // ---- 副檔名檢查（格式由內容判定，從不看副檔名）
     let mut ext_issues = Vec::new();
     let sides =

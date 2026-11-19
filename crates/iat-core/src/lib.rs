@@ -9,12 +9,18 @@
 
 pub mod engine;
 pub mod exit;
+pub mod inflate;
+pub mod input;
 pub mod limits;
 pub mod markdown;
 pub mod paths;
+pub mod png_scan;
+pub mod png_side;
 pub mod report;
 pub mod run;
 pub mod sniff;
+pub mod temp;
+pub mod text;
 pub mod win;
 
 use std::sync::Arc;

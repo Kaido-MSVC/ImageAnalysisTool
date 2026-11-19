@@ -1,20 +1,25 @@
-//! 比對引擎：格式分派、預算，以及色彩／metadata／strict 判定。
-//! 對照 C++ 版 `src/engine/analyze.cpp` 的 `analyze()`。
+//! 比對引擎：格式分派、預算、逐列同步比較，以及色彩／metadata／strict 判定。
+//! 對照 C++ 版 `src/engine/analyze.cpp` 的 `analyze()` 與 `side.hpp`。
 //!
-//! 階段 0 還沒有任何解碼器：辨識出的格式一律回報「不支援」，其餘判定流程照 C++ 版移植，
-//! 之後的階段只要在 [`prepare_side`] 接上各格式即可。
+//! 階段 1 接上 PNG；其他格式仍回報「不支援」（見 docs/decisions.md D-R05）。
 
+use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::fs::File;
-use std::os::windows::fs::FileExt;
+use std::rc::Rc;
 use std::time::Instant;
 
-use crate::limits::Limits;
-use crate::report::{Count, FileReport, MetaItem, MetadataField, PairStatus, Report, code};
+use crate::input::Input;
+use crate::limits::{CODEC_RESERVE, Limits};
+use crate::report::{
+    ChannelStat, Count, DiffEntry, FileReport, Issue, MetaItem, MetadataField, PairStatus, Report, ResourceNeed, code,
+};
 use crate::sniff::sniff_format;
-use crate::{Mode, ms_since};
+use crate::temp::{TempError, TempFile, TempQuota};
+use crate::text::short_hash;
+use crate::{CancelToken, Mode, ms_since};
 
-/// 未知格式訊息中列出的支援格式。沿用 C++ 版 1.0.0 的文字（最終目標的支援範圍），
-/// 階段 0 實際上還不能解碼，見 docs/decisions.md D-R05。
+/// 未知格式訊息中列出的支援格式。沿用 C++ 版 1.0.0 的文字（最終目標的支援範圍），見 D-R05。
 const SUPPORTED_FORMATS: &str = "PNG, TIFF/BigTIFF, WebP, JPEG XL, PSD/PSB, AVIF";
 
 const METADATA_FIELDS: [&str; 9] =
@@ -25,80 +30,98 @@ pub struct AnalysisInput<'a> {
     pub original: &'a File,
     pub output: Option<&'a File>,
     pub limits: Limits,
+    /// 兩側各一個暫存檔（delete-on-close）；建立失敗時外層已經停止
+    pub temp: [Option<&'a File>; 2],
+    pub temp_free_bytes: u64,
+    pub cancel: &'a CancelToken,
+    /// 整次執行的期限（deadline_s）
+    pub deadline: Instant,
 }
 
-struct Side<'a> {
-    scope: &'static str,
-    file: &'a File,
-    size: u64,
-    bytes_read: u64,
-    scan_ms: f64,
-    /// 解碼器已就緒（階段 0 永遠為 false）
-    decodable: bool,
-    /// 比較用的樣本模型與位深（解碼器填入；空字串／0 表示未知）
-    layout_model: String,
-    layout_bits: u32,
+/// 引擎的結果：被取消或超過期限時，外層照 C++ 版處理 worker 被終止的情況。
+pub enum Outcome {
+    Done(Box<Report>),
+    Cancelled,
+    Deadline,
 }
 
-impl<'a> Side<'a> {
-    fn new(scope: &'static str, file: &'a File) -> Self {
-        let size = file.metadata().map_or(0, |m| m.len());
-        Self {
-            scope,
-            file,
-            size,
-            bytes_read: 0,
-            scan_ms: 0.0,
-            decodable: false,
-            layout_model: String::new(),
-            layout_bits: 0,
-        }
-    }
+/// 一側的正規樣本版面。
+#[derive(Clone, Debug, Default)]
+pub struct RowLayout {
+    /// gray | gray_alpha | rgb | rgba
+    pub model: &'static str,
+    pub channels: u32,
+    /// 每個聲道的正規位元數
+    pub bits: u32,
+}
 
-    fn read_head(&mut self) -> Vec<u8> {
-        let mut b = [0u8; 64];
-        let mut n = 0;
-        while n < b.len() {
-            match self.file.seek_read(&mut b[n..], n as u64) {
-                Ok(0) | Err(_) => break,
-                Ok(k) => n += k,
-            }
-        }
-        self.bytes_read += n as u64;
-        b[..n].to_vec()
+impl RowLayout {
+    pub fn new(model: &'static str, channels: u32, bits: u32) -> Self {
+        Self { model, channels, bits }
     }
 }
 
-fn prepare_side(s: &mut Side<'_>, fr: &mut FileReport, issues: &mut Vec<crate::report::Issue>) {
-    let t0 = Instant::now();
-    fr.size_bytes = Count(s.size);
-    fr.format = sniff_format(&s.read_head()).to_string();
-    // 階段 1 起在這裡依格式接上掃描器與解碼器。
-    fr.container_status = "unverified".into();
-    fr.decode_status = "unsupported".into();
-    let unknown = fr.format == "unknown";
-    fr.decode_status_reason = if unknown { "unknown_format" } else { "format_not_supported_in_this_build" }.into();
-    fr.metadata_status = "unverified".into();
-    issues.push(crate::report::Issue::new(
-        if unknown { code::UNKNOWN_FORMAT } else { code::UNSUPPORTED_SAMPLE_MODEL },
-        "error",
-        s.scope,
-        format!("format '{}' is not supported by this build ({SUPPORTED_FORMATS})", fr.format),
-    ));
-    s.decodable = false;
-    s.scan_ms = ms_since(t0);
+/// 一個輸入檔在引擎裡、與格式無關的狀態（C++ 版 `Side` 去掉解碼器的部分）。
+pub struct SideState<'a> {
+    /// original | output
+    pub scope: &'static str,
+    pub input: &'a Input<'a>,
+    pub rep: FileReport,
+    pub layout: RowLayout,
+    pub width: u32,
+    pub height: u32,
+    /// 目前這一列的正規樣本
+    pub canon: Vec<u16>,
+    pub failed: bool,
+    pub rows: u64,
+    pub scan_ms: f64,
+    pub temp: Option<TempFile<'a>>,
+    pub quota: Rc<RefCell<TempQuota>>,
+}
+
+/// 一側的解碼器。引擎依序呼叫：open() 一次；每列 read_row() 一次（由上而下），直到失敗或讀完；
+/// 最後 finish() 一次。read_row() 成功時，SideState::canon 裡有 width × channels 個正規樣本。
+pub trait Decoder<'a> {
+    /// 解碼期間工具自管的緩衝（開始前與 buffer_mib 比較）；算術溢位時為 None。
+    fn buffer_estimate(&self) -> Option<u64>;
+    /// 隨影像變大的解碼器內部記憶體（整圖型解碼器）；逐列解碼器為 0。
+    fn codec_estimate(&self) -> Option<u64> {
+        Some(0)
+    }
+    fn open(&mut self, s: &mut SideState<'a>, issues: &mut Vec<Issue>, lim: &Limits) -> bool;
+    fn read_row(&mut self, s: &mut SideState<'a>, issues: &mut Vec<Issue>) -> bool;
+    fn finish(&mut self, s: &mut SideState<'a>, issues: &mut Vec<Issue>);
+    fn memory_metrics(&self, m: &mut BTreeMap<String, u64>);
+}
+
+/// 暫存失敗：配額或空間用完是資源上限（未檢查，退出碼 4）；其他是環境問題。
+pub fn temp_failure(s: &mut SideState<'_>, issues: &mut Vec<Issue>, e: &TempError) {
+    s.failed = true;
+    s.rep.decode_status = "not_checked".into();
+    if e.kind == "quota" || e.kind == "disk" {
+        s.rep.decode_status_reason = "resource_limit".into();
+        issues.push(Issue::new(code::RESOURCE_LIMIT, "error", s.scope, format!("temporary storage: {}", e.message)));
+    } else {
+        s.rep.decode_status_reason = format!("temp_{}", e.kind);
+        issues.push(Issue::new(code::ENVIRONMENT_ERROR, "error", s.scope, format!("temporary storage: {}", e.message)));
+    }
+}
+
+pub fn has_alpha(model: &str) -> bool {
+    model == "gray_alpha" || model == "rgba"
 }
 
 fn color_base(model: &str) -> &'static str {
     if model.starts_with("gray") { "gray" } else { "rgb" }
 }
 
-fn has_alpha(model: &str) -> bool {
-    model == "gray_alpha" || model == "rgba"
-}
-
-fn short_hash(h: &str) -> &str {
-    &h[..h.len().min(16)]
+fn channel_names(model: &str) -> &'static [&'static str] {
+    match model {
+        "gray" => &["Gray"],
+        "gray_alpha" => &["Gray", "A"],
+        "rgb" => &["R", "G", "B"],
+        _ => &["R", "G", "B", "A"],
+    }
 }
 
 fn compare_item(name: &str, a: Option<&MetaItem>, b: Option<&MetaItem>) -> MetadataField {
@@ -132,85 +155,427 @@ fn compare_item(name: &str, a: Option<&MetaItem>, b: Option<&MetaItem>) -> Metad
     f
 }
 
+/// 以 step_mib 的倍數向上取整、可容納需要量的最小上限值（MiB）；超過 max_mib 時為 None。
+pub fn suggest_limit_mib(needed: u64, reserve: u64, step_mib: u64, max_mib: u64) -> Option<u64> {
+    let total = needed.checked_add(reserve)?;
+    if step_mib == 0 {
+        return None;
+    }
+    let mib = (total >> 20) + u64::from(total & ((1 << 20) - 1) != 0);
+    let rounded = mib.div_ceil(step_mib) * step_mib;
+    (rounded >= mib && rounded <= max_mib).then_some(rounded)
+}
+
+struct Side<'a> {
+    st: SideState<'a>,
+    dec: Option<Box<dyn Decoder<'a> + 'a>>,
+    /// 格式支援且可以開始解碼
+    decodable: bool,
+}
+
+fn new_side<'a>(
+    scope: &'static str,
+    input: &'a Input<'a>,
+    temp: Option<&'a File>,
+    quota: &Rc<RefCell<TempQuota>>,
+) -> Side<'a> {
+    Side {
+        st: SideState {
+            scope,
+            input,
+            rep: FileReport { name: scope.into(), ..FileReport::default() },
+            layout: RowLayout::default(),
+            width: 0,
+            height: 0,
+            canon: Vec::new(),
+            failed: false,
+            rows: 0,
+            scan_ms: 0.0,
+            temp: temp.map(|f| TempFile::new(Some(f))),
+            quota: Rc::clone(quota),
+        },
+        dec: None,
+        decodable: false,
+    }
+}
+
+fn prepare_side<'a>(s: &mut Side<'a>, issues: &mut Vec<Issue>, lim: &Limits) {
+    let st = &mut s.st;
+    st.rep.size_bytes = Count(st.input.size());
+    let mut head = [0u8; 64];
+    let n = st.input.read_at(0, &mut head).unwrap_or(0);
+    st.rep.format = sniff_format(&head[..n]).to_string();
+    if st.rep.format == "png" {
+        s.dec = crate::png_side::prepare_png(st, issues, lim);
+    } else {
+        let t0 = Instant::now();
+        st.rep.container_status = "unverified".into();
+        st.rep.decode_status = "unsupported".into();
+        let unknown = st.rep.format == "unknown";
+        st.rep.decode_status_reason =
+            if unknown { "unknown_format" } else { "format_not_supported_in_this_build" }.into();
+        st.rep.metadata_status = "unverified".into();
+        issues.push(Issue::new(
+            if unknown { code::UNKNOWN_FORMAT } else { code::UNSUPPORTED_SAMPLE_MODEL },
+            "error",
+            st.scope,
+            format!("format '{}' is not supported by this build ({SUPPORTED_FORMATS})", st.rep.format),
+        ));
+        st.scan_ms = ms_since(t0);
+    }
+    s.decodable = s.dec.is_some();
+}
+
+#[derive(Default)]
+struct Stats {
+    differing: Vec<u64>,
+    maxabs: Vec<u32>,
+    sumabs: Vec<u128>,
+    sumsq: Vec<u128>,
+    pixels: u64,
+    pixels_diff: u64,
+    first: Vec<DiffEntry>,
+}
+
+/// 與 C++ 版 U128::approx 相同的換算（只供顯示）。
+fn approx(v: u128) -> f64 {
+    (v >> 64) as u64 as f64 * 18446744073709551616.0 + v as u64 as f64
+}
+
 /// 一次分析，產生 C++ 版 worker 那一半的報告（身分欄位與執行層級資料由 [`crate::run`] 補上）。
-pub fn analyze(input: &AnalysisInput<'_>) -> Report {
+pub fn analyze(input: &AnalysisInput<'_>) -> Outcome {
     let t_all = Instant::now();
     let compare = input.mode == Mode::Compare;
+    let lim = &input.limits;
     let mut r = Report { mode: input.mode.as_str().into(), ..Report::default() };
-    r.original.name = "original".into();
-    if compare {
-        r.output = Some(FileReport::default());
+    r.codecs.insert(crate::png_side::DECODER_NAME.into(), crate::png_side::DECODER_VERSION.into());
+
+    let quota = Rc::new(RefCell::new(TempQuota::new(lim.temp_gib << 30, input.temp_free_bytes)));
+    let in_a = Input::new(input.original);
+    let in_b = input.output.map(Input::new);
+    let mut issues: Vec<Issue> = Vec::new();
+    let mut a = new_side("original", &in_a, input.temp[0], &quota);
+    let mut b = in_b.as_ref().map(|i| new_side("output", i, input.temp[1], &quota));
+    prepare_side(&mut a, &mut issues, lim);
+    if let Some(b) = b.as_mut() {
+        prepare_side(b, &mut issues, lim);
     }
 
-    let mut a = Side::new("original", input.original);
-    let mut b = input.output.map(|f| Side::new("output", f));
-    prepare_side(&mut a, &mut r.original, &mut r.issues);
-    if let (Some(b), Some(out)) = (b.as_mut(), r.output.as_mut()) {
-        prepare_side(b, out, &mut r.issues);
+    // ---- 預算：只算列緩衝（從不整張圖），64 位元檢查過的算術
+    let mut need: u64 = 0;
+    let mut overflow = false;
+    for s in std::iter::once(&mut a).chain(b.as_mut()) {
+        if !s.decodable {
+            continue;
+        }
+        match s.dec.as_ref().and_then(|d| d.buffer_estimate()).and_then(|e| need.checked_add(e)) {
+            Some(n) => need = n,
+            None => {
+                overflow = true;
+                break;
+            }
+        }
+    }
+    if overflow || need > lim.buffer_bytes() {
+        // 列緩衝是兩側共用的一個預算：每個被擋下的一側記錄相同的需要量。
+        let sug = if overflow { None } else { suggest_limit_mib(need, 0, 16, 1 << 16) };
+        let arg = sug.map(|v| format!("--limits buffer_mib={v}")).unwrap_or_default();
+        for s in std::iter::once(&mut a).chain(b.as_mut()) {
+            if !s.decodable {
+                continue;
+            }
+            s.decodable = false;
+            s.st.rep.decode_status = "not_checked".into();
+            s.st.rep.decode_status_reason = "resource_limit".into();
+            if !overflow {
+                s.st.rep.resource_need = Some(ResourceNeed {
+                    limit: "buffer_mib".into(),
+                    needed_bytes: Count(need),
+                    allowed_bytes: Count(lim.buffer_bytes()),
+                    current_value: lim.buffer_mib,
+                    suggested_value: sug,
+                    suggested_argument: arg.clone(),
+                });
+            }
+        }
+        let msg = if overflow {
+            "row buffer size overflows 64-bit arithmetic".to_string()
+        } else {
+            let tail = if sug.is_some() {
+                format!("rerun with {arg}")
+            } else {
+                "this exceeds the largest allowed buffer_mib".into()
+            };
+            format!(
+                "row buffers need {need} bytes ({} MiB), budget is {} bytes (buffer_mib={}); {tail}",
+                need.div_ceil(1 << 20),
+                lim.buffer_bytes(),
+                lim.buffer_mib
+            )
+        };
+        issues.push(Issue::new(code::RESOURCE_LIMIT, "error", "run", msg));
     }
 
-    // 預算檢查與整圖型解碼器的預估：階段 0 沒有可解碼的一側，need 恆為 0。
-    let need: u64 = 0;
+    // ---- 整圖型解碼器的記憶體預估與硬上限（D10）。兩側依序解碼，各自與列緩衝合計比較。
+    let pct = lim.test_codec_estimate_pct;
+    let mut codec_need_peak = 0u64;
+    for s in std::iter::once(&mut a).chain(b.as_mut()) {
+        if !s.decodable {
+            continue;
+        }
+        let est = s.dec.as_ref().and_then(|d| d.codec_estimate());
+        if est == Some(0) {
+            continue;
+        }
+        let scaled = est.and_then(|e| e.checked_mul(pct));
+        let with_rows = scaled.and_then(|v| (v / 100).checked_add(need));
+        match with_rows {
+            Some(w) if w <= lim.codec_cap_bytes() => codec_need_peak = codec_need_peak.max(w),
+            _ => {
+                s.decodable = false;
+                s.st.rep.decode_status = "not_checked".into();
+                s.st.rep.decode_status_reason = "resource_limit".into();
+                let sug = with_rows.and_then(|w| suggest_limit_mib(w, CODEC_RESERVE, 256, 1 << 20));
+                let arg = sug.map(|v| format!("--limits job_commit_mib={v}")).unwrap_or_default();
+                if let Some(w) = with_rows {
+                    s.st.rep.resource_need = Some(ResourceNeed {
+                        limit: "job_commit_mib".into(),
+                        needed_bytes: Count(w),
+                        allowed_bytes: Count(lim.codec_cap_bytes()),
+                        current_value: lim.job_commit_mib,
+                        suggested_value: sug,
+                        suggested_argument: arg.clone(),
+                    });
+                }
+                let msg = match with_rows {
+                    None => "decoder memory estimate overflows 64-bit arithmetic".to_string(),
+                    Some(w) => {
+                        let tail = if sug.is_some() {
+                            format!("rerun with {arg}")
+                        } else {
+                            "this exceeds the largest allowed job_commit_mib".into()
+                        };
+                        format!(
+                            "decoder needs about {w} bytes ({} MiB: codec estimate {} + row buffers {need}), hard cap is {} bytes = job_commit_mib ({}) - 64 MiB; {tail}",
+                            w.div_ceil(1 << 20),
+                            scaled.unwrap_or(0) / 100,
+                            lim.codec_cap_bytes(),
+                            lim.job_commit_mib
+                        )
+                    }
+                };
+                issues.push(Issue::new(code::RESOURCE_LIMIT, "error", s.st.scope, msg));
+            }
+        }
+    }
 
-    let t_dec = Instant::now();
-    // 解碼與逐列比較：階段 1 加入。
-    let dec_ms = ms_since(t_dec);
+    for s in std::iter::once(&mut a).chain(b.as_mut()) {
+        if s.decodable {
+            let dec = s.dec.as_mut().expect("decodable sides have a decoder");
+            if dec.open(&mut s.st, &mut issues, lim) {
+                s.st.canon = vec![0; s.st.width as usize * s.st.layout.channels as usize];
+            } else {
+                s.decodable = false;
+            }
+        }
+    }
 
-    if let (Some(b), Some(out)) = (b.as_ref(), r.output.as_ref()) {
-        let orig = &r.original;
-        let mut issues = Vec::new();
-        // ---- comparability
-        let mut not_cmp_reason = "";
-        if orig.width != out.width || orig.height != out.height {
+    // ---- 可比性
+    let mut not_cmp_reason = "";
+    let mut comparable = false;
+    if let Some(b) = b.as_ref() {
+        let (oa, ob) = (&a.st.rep, &b.st.rep);
+        comparable = a.decodable && b.decodable;
+        if oa.width != ob.width || oa.height != ob.height {
             not_cmp_reason = code::GEOMETRY_DIFFERS;
-        } else if orig.orientation.source == "unparseable" || out.orientation.source == "unparseable" {
+        } else if oa.orientation.source == "unparseable" || ob.orientation.source == "unparseable" {
             not_cmp_reason = code::ORIENTATION_UNPARSEABLE;
-        } else if orig.orientation.source == "unknown" || out.orientation.source == "unknown" {
-            not_cmp_reason = code::ORIENTATION_UNKNOWN;
-        } else if orig.orientation.value != out.orientation.value {
+        } else if oa.orientation.source == "unknown" || ob.orientation.source == "unknown" {
+            not_cmp_reason = code::ORIENTATION_UNKNOWN; // 沒讀到 EXIF：樣本相等也證明不了什麼
+        } else if oa.orientation.value != ob.orientation.value {
             not_cmp_reason = code::ORIENTATION_DIFFERS;
-        } else if !a.layout_model.is_empty()
-            && !b.layout_model.is_empty()
-            && color_base(&a.layout_model) != color_base(&b.layout_model)
+        } else if !a.st.layout.model.is_empty()
+            && !b.st.layout.model.is_empty()
+            && color_base(a.st.layout.model) != color_base(b.st.layout.model)
         {
             not_cmp_reason = code::SAMPLE_MODEL_CHANGED;
-        } else if a.layout_bits != 0 && b.layout_bits != 0 && a.layout_bits != b.layout_bits {
+        } else if a.st.layout.bits != 0 && b.st.layout.bits != 0 && a.st.layout.bits != b.st.layout.bits {
             not_cmp_reason = code::BIT_DEPTH_CHANGED;
         }
-        let comparable = a.decodable && b.decodable && not_cmp_reason.is_empty();
-        if orig.interlace >= 0 && out.interlace >= 0 && orig.interlace != out.interlace {
-            issues.push(crate::report::Issue::new(
+        if !not_cmp_reason.is_empty() {
+            comparable = false;
+        }
+        // 交錯只影響儲存順序；樣本依影像順序比較。
+        if oa.interlace >= 0 && ob.interlace >= 0 && oa.interlace != ob.interlace {
+            issues.push(Issue::new(
                 code::INTERLACE_DIFFERS,
                 "info",
                 "pair",
                 format!(
                     "interlace {} vs {} (storage order only; samples compared in image order)",
-                    orig.interlace, out.interlace
+                    oa.interlace, ob.interlace
                 ),
             ));
         }
+    }
 
-        // ---- sample comparison result
-        let complete = orig.decode_status == "complete" && out.decode_status == "complete";
-        if !not_cmp_reason.is_empty() {
-            r.samples.status = "not_comparable".into();
-            r.samples.reason = not_cmp_reason.into();
-        } else if !a.decodable || !b.decodable || !complete {
-            r.samples.status = if comparable { "incomplete" } else { "not_compared" }.into();
-            r.samples.reason = "decode_incomplete".into();
+    // ---- 解碼（並逐列同步比較）
+    let stop = |cancel: &CancelToken| -> Option<Outcome> {
+        if cancel.is_cancelled() {
+            Some(Outcome::Cancelled)
+        } else if Instant::now() >= input.deadline {
+            Some(Outcome::Deadline)
+        } else {
+            None
         }
-        // 雙方完整解碼後的統計（equal／differs）：階段 1 加入。
+    };
+    let t_dec = Instant::now();
+    let mut stats = Stats::default();
+    let mut names: &[&str] = &[];
+    let (mut a_alpha, mut b_alpha): (Option<usize>, Option<usize>) = (None, None);
+    if comparable && let Some(b) = b.as_mut() {
+        let wide = if has_alpha(a.st.layout.model) { a.st.layout.model } else { b.st.layout.model };
+        names = channel_names(wide);
+        let n = names.len();
+        a_alpha = has_alpha(a.st.layout.model).then(|| a.st.layout.channels as usize - 1);
+        b_alpha = has_alpha(b.st.layout.model).then(|| b.st.layout.channels as usize - 1);
+        let alpha_max = (1u32 << a.st.layout.bits) - 1;
+        stats.differing = vec![0; n];
+        stats.maxabs = vec![0; n];
+        stats.sumabs = vec![0; n];
+        stats.sumsq = vec![0; n];
+        let same_layout = a.st.layout.channels == b.st.layout.channels;
+        let (ach, bch) = (a.st.layout.channels as usize, b.st.layout.channels as usize);
+        let w = a.st.width;
+        for y in 0..a.st.height {
+            if let Some(o) = stop(input.cancel) {
+                return o;
+            }
+            let ra = a.dec.as_mut().expect("decodable").read_row(&mut a.st, &mut issues);
+            let rb = b.dec.as_mut().expect("decodable").read_row(&mut b.st, &mut issues);
+            if !ra || !rb {
+                break;
+            }
+            if same_layout && a.st.canon == b.st.canon {
+                stats.pixels += w as u64;
+                continue;
+            }
+            for x in 0..w as usize {
+                let pa = &a.st.canon[x * ach..(x + 1) * ach];
+                let pb = &b.st.canon[x * bch..(x + 1) * bch];
+                let mut pixel_diff = false;
+                for c in 0..n {
+                    let is_alpha = (a_alpha.is_some() || b_alpha.is_some()) && c == n - 1;
+                    let va = if is_alpha { a_alpha.map_or(alpha_max, |i| pa[i] as u32) } else { pa[c] as u32 };
+                    let vb = if is_alpha { b_alpha.map_or(alpha_max, |i| pb[i] as u32) } else { pb[c] as u32 };
+                    if va != vb {
+                        let d = va.abs_diff(vb);
+                        stats.differing[c] += 1;
+                        stats.maxabs[c] = stats.maxabs[c].max(d);
+                        stats.sumabs[c] += d as u128;
+                        stats.sumsq[c] += (d as u128) * (d as u128);
+                        pixel_diff = true;
+                    }
+                }
+                if pixel_diff {
+                    stats.pixels_diff += 1;
+                    if stats.first.len() < 16 {
+                        stats.first.push(DiffEntry {
+                            x: x as u64,
+                            y: y as u64,
+                            original: pa.iter().map(|&v| v as u32).collect(),
+                            output: pb.iter().map(|&v| v as u32).collect(),
+                        });
+                    }
+                }
+            }
+            stats.pixels += w as u64;
+        }
+    }
+    // 沒有比較（或中途停下）的一側仍然解到最後，才知道它本身是否完整。
+    for s in std::iter::once(&mut a).chain(b.as_mut()) {
+        if !s.decodable {
+            continue;
+        }
+        let dec = s.dec.as_mut().expect("decodable");
+        while !s.st.failed && s.st.rows < s.st.height as u64 {
+            if let Some(o) = stop(input.cancel) {
+                return o;
+            }
+            if !dec.read_row(&mut s.st, &mut issues) {
+                break;
+            }
+        }
+    }
+    for s in std::iter::once(&mut a).chain(b.as_mut()) {
+        if s.decodable {
+            s.dec.as_mut().expect("decodable").finish(&mut s.st, &mut issues);
+        }
+    }
+    let dec_ms = ms_since(t_dec);
 
-        if (orig.sample_model.alpha == "matted_white") != (out.sample_model.alpha == "matted_white")
-            && has_alpha(&a.layout_model)
-            && has_alpha(&b.layout_model)
-        {
-            let other = if orig.sample_model.alpha == "matted_white" {
-                &out.sample_model.alpha
-            } else {
-                &orig.sample_model.alpha
+    if let Some(b) = b.as_ref() {
+        let (oa, ob) = (&a.st.rep, &b.st.rep);
+        // ---- 樣本比較結果
+        let complete = oa.decode_status == "complete" && ob.decode_status == "complete";
+        let sc = &mut r.samples;
+        if !not_cmp_reason.is_empty() {
+            sc.status = "not_comparable".into();
+            sc.reason = not_cmp_reason.into();
+        } else if !a.decodable || !b.decodable || !complete {
+            sc.status = if comparable { "incomplete" } else { "not_compared" }.into();
+            sc.reason = "decode_incomplete".into();
+        } else {
+            sc.pixels_compared = Some(Count(stats.pixels));
+            sc.pixels_differing = Some(Count(stats.pixels_diff));
+            sc.status = if stats.pixels_diff == 0 { "equal" } else { "differs" }.into();
+            sc.includes_alpha = a_alpha.is_some() || b_alpha.is_some();
+            let unit = match a.st.layout.bits {
+                16 => "uint16",
+                8 => "uint8",
+                _ => "native",
             };
-            issues.push(crate::report::Issue::new(
+            sc.unit = format!("{unit} code value; per-channel denominator = pixels_compared");
+            for (c, name) in names.iter().enumerate() {
+                let mut cs = ChannelStat {
+                    name: (*name).into(),
+                    differing: Count(stats.differing[c]),
+                    max_abs_error: stats.maxabs[c],
+                    mae: 0.0,
+                    rmse: 0.0,
+                };
+                if stats.pixels > 0 {
+                    cs.mae = approx(stats.sumabs[c]) / stats.pixels as f64;
+                    cs.rmse = (approx(stats.sumsq[c]) / stats.pixels as f64).sqrt();
+                }
+                sc.per_channel.push(cs);
+            }
+            sc.first_differences = std::mem::take(&mut stats.first);
+            if a_alpha.is_none() && b_alpha.is_some() {
+                issues.push(Issue::new(
+                    code::ALPHA_CHANNEL_ADDED,
+                    "info",
+                    "pair",
+                    "output adds an alpha channel; original compared as fully opaque",
+                ));
+            }
+            if a_alpha.is_some() && b_alpha.is_none() {
+                issues.push(Issue::new(
+                    code::ALPHA_CHANNEL_REMOVED,
+                    "info",
+                    "pair",
+                    "output drops the alpha channel; output compared as fully opaque",
+                ));
+            }
+        }
+        // PSD 合成的 alpha 已與白色混合；和直通 alpha 的語意不同。
+        if (oa.sample_model.alpha == "matted_white") != (ob.sample_model.alpha == "matted_white")
+            && has_alpha(a.st.layout.model)
+            && has_alpha(b.st.layout.model)
+        {
+            let other =
+                if oa.sample_model.alpha == "matted_white" { &ob.sample_model.alpha } else { &oa.sample_model.alpha };
+            issues.push(Issue::new(
                 code::ALPHA_SEMANTICS_DIFFER,
                 "warning",
                 "pair",
@@ -219,13 +584,13 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Report {
         }
         // AVIF 的像素驗證判定：階段 6 加入。
 
-        // ---- geometry
-        if orig.width != 0 && out.width != 0 {
-            let same = orig.width == out.width
-                && orig.height == out.height
-                && orig.orientation.value == out.orientation.value
-                && !matches!(orig.orientation.source.as_str(), "unparseable" | "unknown")
-                && !matches!(out.orientation.source.as_str(), "unparseable" | "unknown");
+        // ---- 幾何
+        if oa.width != 0 && ob.width != 0 {
+            let same = oa.width == ob.width
+                && oa.height == ob.height
+                && oa.orientation.value == ob.orientation.value
+                && !matches!(oa.orientation.source.as_str(), "unparseable" | "unknown")
+                && !matches!(ob.orientation.source.as_str(), "unparseable" | "unknown");
             let orient_unknown =
                 not_cmp_reason == code::ORIENTATION_UNPARSEABLE || not_cmp_reason == code::ORIENTATION_UNKNOWN;
             r.geometry.status = if same {
@@ -238,14 +603,14 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Report {
             .into();
             r.geometry.basis = format!(
                 "stored size {}x{} vs {}x{}; orientation {} ({}) vs {} ({})",
-                orig.width,
-                orig.height,
-                out.width,
-                out.height,
-                orig.orientation.value,
-                orig.orientation.source,
-                out.orientation.value,
-                out.orientation.source
+                oa.width,
+                oa.height,
+                ob.width,
+                ob.height,
+                oa.orientation.value,
+                oa.orientation.source,
+                ob.orientation.value,
+                ob.orientation.source
             );
         } else {
             r.geometry.status = "unknown".into();
@@ -254,18 +619,18 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Report {
             .contains(&not_cmp_reason)
         {
             let msg = if not_cmp_reason == code::BIT_DEPTH_CHANGED {
-                format!("bit depth {} vs {}", a.layout_bits, b.layout_bits)
+                format!("bit depth {} vs {}", a.st.layout.bits, b.st.layout.bits)
             } else if not_cmp_reason == code::SAMPLE_MODEL_CHANGED {
-                format!("{} vs {}", a.layout_model, b.layout_model)
+                format!("{} vs {}", a.st.layout.model, b.st.layout.model)
             } else {
                 r.geometry.basis.clone()
             };
-            issues.push(crate::report::Issue::new(not_cmp_reason, "error", "pair", msg));
+            issues.push(Issue::new(not_cmp_reason, "error", "pair", msg));
         }
 
-        // ---- colour (D4, D12) and ICC (D2)
-        let (ca, cb) = (&orig.color, &out.color);
-        let mut pair_issue = |c: &str, sev: &str, m: String| issues.push(crate::report::Issue::new(c, sev, "pair", m));
+        // ---- 色彩（D4、D12）與 ICC（D2）
+        let (ca, cb) = (&oa.color, &ob.color);
+        let mut pair_issue = |c: &str, sev: &str, m: String| issues.push(Issue::new(c, sev, "pair", m));
         // JXL 色彩 enum 的等價規則（jxl_equivalence）：階段 5 加入。
         if ca.kind.is_empty() || cb.kind.is_empty() {
             r.color = PairStatus::new("unknown", "colour information not available (decoder did not start)");
@@ -296,8 +661,8 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Report {
                 "differs",
                 format!(
                     "embedded ICC profiles differ (sha256 {} vs {})",
-                    short_hash(&orig.icc.sha256),
-                    short_hash(&out.icc.sha256)
+                    short_hash(&oa.icc.sha256),
+                    short_hash(&ob.icc.sha256)
                 ),
             );
             pair_issue(code::ICC_DIFFERS, "warning", format!("{}; appearance change is not proven", r.color.basis));
@@ -311,7 +676,7 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Report {
             r.color = PairStatus::new("unverified", format!("{} vs {} (no reliable equivalence)", ca.kind, cb.kind));
             pair_issue(code::COLOR_UNVERIFIED, "warning", r.color.basis.clone());
         }
-        let (ia, ib) = (&orig.icc, &out.icc);
+        let (ia, ib) = (&oa.icc, &ob.icc);
         let (sa, sb) = (ia.status == "synthesized", ib.status == "synthesized");
         let same_hash = if ia.sha256 == ib.sha256 { "identical" } else { "differs" };
         r.icc = match (ia.status.as_str(), ib.status.as_str()) {
@@ -331,14 +696,14 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Report {
         };
 
         // WebP 政策：原檔超過 16383 時，無法以原尺寸交付成 WebP。
-        if out.format == "webp" && (orig.width > 16383 || orig.height > 16383) {
-            issues.push(crate::report::Issue::new(
+        if ob.format == "webp" && (oa.width > 16383 || oa.height > 16383) {
+            issues.push(Issue::new(
                 code::WEBP_POLICY_CANNOT_HOLD_ORIGINAL,
                 "info",
                 "pair",
                 format!(
                     "original is {}x{}; under the 16383 WebP policy it cannot be delivered as WebP at its original size",
-                    orig.width, orig.height
+                    oa.width, oa.height
                 ),
             ));
         }
@@ -346,12 +711,12 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Report {
         // ---- metadata
         let mut meta_changed = false;
         for f in METADATA_FIELDS {
-            let mf = compare_item(f, orig.metadata.get(f), out.metadata.get(f));
+            let mf = compare_item(f, oa.metadata.get(f), ob.metadata.get(f));
             meta_changed |= mf.status != "same" && mf.status != "both_absent";
             r.metadata.fields.push(mf);
         }
         if meta_changed {
-            issues.push(crate::report::Issue::new(
+            issues.push(Issue::new(
                 code::METADATA_CHANGED,
                 "info",
                 "pair",
@@ -359,35 +724,32 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Report {
             ));
         }
 
-        // ---- size
-        r.size.original_bytes = Count(a.size);
-        r.size.output_bytes = Some(Count(b.size));
+        // ---- 大小
+        let (sa_, sb_) = (a.st.input.size(), b.st.input.size());
+        r.size.original_bytes = Count(sa_);
+        r.size.output_bytes = Some(Count(sb_));
         r.size.comparable = complete;
-        if a.size > 0 {
-            let ratio = b.size as f64 / a.size as f64;
+        if sa_ > 0 {
+            let ratio = sb_ as f64 / sa_ as f64;
             r.size.output_ratio = Some(ratio);
             r.size.saving_ratio = Some(1.0 - ratio);
         }
-        if b.size > 0 {
-            r.size.compression_factor = Some(a.size as f64 / b.size as f64);
+        if sb_ > 0 {
+            r.size.compression_factor = Some(sa_ as f64 / sb_ as f64);
         }
         if !complete {
             r.size.note = "at least one file did not decode completely; not a valid conversion size comparison".into();
         }
-        r.issues.extend(issues);
-        strict_compare(&mut r, not_cmp_reason);
     } else {
-        r.size.original_bytes = Count(a.size);
+        r.size.original_bytes = Count(a.st.input.size());
         r.size.comparable = false;
-        r.strict.result = "not_evaluated".into();
-        r.strict.reasons.push("inspect_mode".into());
     }
 
     // ---- metrics（引擎側）
     let m = &mut r.metrics;
-    m.time_ms.insert("scan_original".into(), a.scan_ms);
+    m.time_ms.insert("scan_original".into(), a.st.scan_ms);
     if let Some(b) = &b {
-        m.time_ms.insert("scan_output".into(), b.scan_ms);
+        m.time_ms.insert("scan_output".into(), b.st.scan_ms);
     }
     m.time_ms.insert(if compare { "decode_and_compare" } else { "decode" }.into(), dec_ms);
     m.time_ms.insert("analyze_total".into(), ms_since(t_all));
@@ -397,12 +759,46 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Report {
         "single file decode"
     }
     .into();
-    for k in ["tool_row_buffers", "temp_reserved_peak", "temp_written", "temp_read"] {
-        m.memory_bytes.insert(k.into(), Some(Count(0)));
+    let mut mem: BTreeMap<String, u64> = BTreeMap::new();
+    mem.insert("tool_row_buffers".into(), 0);
+    let (mut t_written, mut t_read, mut t_ms) = (0u64, 0u64, 0f64);
+    for s in std::iter::once(&a).chain(b.as_ref()) {
+        *mem.get_mut("tool_row_buffers").expect("inserted") += s.st.canon.capacity() as u64 * 2;
+        if let Some(d) = &s.dec {
+            d.memory_metrics(&mut mem);
+        }
+        if let Some(t) = &s.st.temp {
+            t_written += t.written();
+            t_read += t.bytes_read();
+            t_ms += t.io_ms();
+        }
+    }
+    for (k, v) in mem {
+        m.memory_bytes.insert(k, Some(Count(v)));
     }
     m.memory_bytes.insert("row_budget_estimate".into(), Some(Count(need)));
-    m.io_read_bytes = Some(Count(a.bytes_read + b.as_ref().map_or(0, |b| b.bytes_read)));
-    r
+    if codec_need_peak > 0 {
+        m.memory_bytes.insert("codec_need_estimate_peak".into(), Some(Count(codec_need_peak)));
+    }
+    let reserved = quota.borrow().reserved();
+    m.memory_bytes.insert("temp_reserved_peak".into(), Some(Count(reserved)));
+    m.memory_bytes.insert("temp_written".into(), Some(Count(t_written)));
+    m.memory_bytes.insert("temp_read".into(), Some(Count(t_read)));
+    if reserved > 0 {
+        m.time_ms.insert("temp_io".into(), t_ms);
+    }
+    m.io_read_bytes = Some(Count(in_a.bytes_read() + in_b.as_ref().map_or(0, Input::bytes_read)));
+
+    r.issues = issues;
+    r.original = std::mem::take(&mut a.st.rep);
+    if let Some(mut b) = b {
+        r.output = Some(std::mem::take(&mut b.st.rep));
+        strict_compare(&mut r, not_cmp_reason);
+    } else {
+        r.strict.result = "not_evaluated".into();
+        r.strict.reasons.push("inspect_mode".into());
+    }
+    Outcome::Done(Box::new(r))
 }
 
 fn embedded_vs_synth(same_hash: &str) -> PairStatus {
@@ -449,12 +845,14 @@ fn strict_compare(r: &mut Report, not_cmp_reason: &str) {
         r.add_issue(code::SAMPLES_DIFFER, "error", "pair", format!("{d} of {c} pixels differ"));
     } else {
         let sides = [("original", &r.original), ("output", out)];
+        // 結構政策：PNG 的警告是尾端資料；其他格式一律稱為容器警告。
         for (p, f) in sides {
             if f.container_status != "valid" {
                 reasons
                     .push(format!("{p}:{}", if f.format == "png" { code::TRAILING_DATA } else { "container_warning" }));
             }
         }
+        // Alpha 語意：只有直通 alpha（或沒有 alpha）才可能嚴格一致。
         for (p, f) in sides {
             if matches!(f.sample_model.alpha.as_str(), "associated" | "unspecified" | "matted_white") {
                 reasons.push(format!("{p}:alpha_{}", f.sample_model.alpha));
@@ -506,5 +904,13 @@ mod tests {
             compare_item("x", Some(&present("parse_failed", "")), Some(&present("over_limit", ""))).status,
             "parse_failed"
         );
+    }
+
+    #[test]
+    fn suggested_limits_round_up() {
+        assert_eq!(suggest_limit_mib(1, 0, 16, 1 << 16), Some(16));
+        assert_eq!(suggest_limit_mib(17 << 20, 0, 16, 1 << 16), Some(32));
+        assert_eq!(suggest_limit_mib(u64::MAX, 1, 16, 1 << 16), None);
+        assert_eq!(suggest_limit_mib(1 << 40, 0, 16, 1 << 16), None);
     }
 }
