@@ -1,42 +1,44 @@
-# CLI 回歸比對（tools/regress）
+# CLI regression comparison (tools/regress)
 
-用來確認重構或重建後，`iat` 的 CLI 行為（退出碼、stdout、stderr、JSON 與 Markdown 報告）和先前保存的基準一致。只用 Python 標準函式庫（本機以 `py -3.13` 執行）。
+English | [繁體中文](README.zh-TW.md)
 
-| 檔案 | 用途 |
+Confirms after a refactor or rebuild that the CLI behavior of `iat` (exit code, stdout, stderr, JSON and Markdown reports) matches a previously saved baseline. Uses only the Python standard library (run locally with `py -3.13`).
+
+| File | Purpose |
 |---|---|
-| `gen_pairs.py` | 以 IMB-C 的 `magick.exe`（唯讀呼叫）從一張本機 PNG 裁切並轉出各格式的對照組 |
-| `run_cases.py` | 執行全部案例，每個案例存一個資料夾（`stdout`、`stderr`、`exit`、`report.json`、`report.md`、`args.json`） |
-| `compare_runs.py` | 比對兩次執行結果；會遮罩 `run_id`、時間／記憶體／I/O 數值、暫存可用空間與案例資料夾路徑 |
-| `cases.example.json` | 本機設定檔範例（不含真實路徑） |
+| `gen_pairs.py` | Crops a local PNG and converts it into comparison pairs in each format with IMB-C's `magick.exe` (read-only call) |
+| `run_cases.py` | Runs every case and saves one folder per case (`stdout`, `stderr`, `exit`, `report.json`, `report.md`, `args.json`) |
+| `compare_runs.py` | Compares two runs; masks `run_id`, time / memory / I/O figures, free temp space and case folder paths |
+| `cases.example.json` | Example local configuration file (no real paths) |
 
-案例分兩類：
+There are two kinds of cases:
 
-- **內建案例**：參數錯誤（退出碼 5）、`gen_pairs.py` 產生的對照組（IMB-C 的呼叫方式）、資源上限，以及 repo 內 `tests/fixtures/imbc/` 的 IMB-C 輸出。
-- **本機樣本案例**：寫在本機設定檔 `tools/regress/cases.local.json`（已列入 `.gitignore`，不進 repo）。私人圖片的檔名與路徑只放在這裡。格式見 `cases.example.json`：
-  - `samples_dir`：樣本資料夾（只讀；執行前後核對大小、修改時間與 SHA-256）。
-  - `cases[]`：`name`、`shape`（`full`＝加上 JSON／Markdown 報告與 `--stdout json`；`imbc`＝IMB-C 的 compare 呼叫方式，`args` 為兩個輸入；`raw`＝原樣傳入）、`args`。`{S}/`、`{P}/`、`{I}/` 開頭分別代表樣本資料夾、對照組資料夾、`tests/fixtures/imbc`。
-  - `inspect_all`：對樣本資料夾內符合副檔名的每個檔案執行 inspect（`--skip-big` 時略過）。
-  - `pairs`：給 `gen_pairs.py` 用；`crop_source` 是要裁切的 PNG（預設為資料夾內第一個 PNG），`psd_references` 是要以 ImageMagick 轉出合成影像 PNG 的 PSD／PSB。
+- **Built-in cases**: argument errors (exit code 5), the pairs produced by `gen_pairs.py` (IMB-C's invocation style), resource limits, and the IMB-C outputs in the repo's `tests/fixtures/imbc/`.
+- **Local sample cases**: defined in the local configuration file `tools/regress/cases.local.json` (listed in `.gitignore`, never committed). File names and paths of private images live only there. See `cases.example.json` for the format:
+  - `samples_dir`: the sample folder (read only; size, modification time and SHA-256 are checked before and after the run).
+  - `cases[]`: `name`, `shape` (`full` = adds JSON / Markdown reports and `--stdout json`; `imbc` = IMB-C's compare invocation, with `args` being the two inputs; `raw` = passed as is), `args`. A leading `{S}/`, `{P}/` or `{I}/` stands for the sample folder, the pairs folder and `tests/fixtures/imbc` respectively.
+  - `inspect_all`: runs inspect on every file in the sample folder whose extension matches (skipped with `--skip-big`).
+  - `pairs`: used by `gen_pairs.py`; `crop_source` is the PNG to crop (default: the first PNG in the folder), `psd_references` are the PSD / PSB files whose composite image is converted to PNG with ImageMagick.
 
-沒有設定檔時只跑內建案例。
+Without a configuration file only the built-in cases run.
 
-## 用法
+## Usage
 
 ```powershell
-# 1. 產生對照組（只需一次；輸出資料夾放在 repo 外）
+# 1. Generate the pairs (only once; keep the output folder outside the repo)
 py -3.13 -I tools/regress/gen_pairs.py --magick <IMB-C>\target\release\ImageMagick\magick.exe --out <work>\pairs
 
-# 2. 以目前的建置執行（--out 必須是新資料夾）
+# 2. Run with the current build (--out must be a new folder)
 py -3.13 -I tools/regress/run_cases.py --bin build/release/bin --out <work>\run-new --pairs <work>\pairs
 
-# 3. 與基準比對（版本不同時加 --ignore-version <基準版本> <新版本>）
+# 3. Compare with the baseline (when the versions differ, add --ignore-version <baseline version> <new version>)
 py -3.13 -I tools/regress/compare_runs.py <work>\baseline <work>\run-new
 ```
 
-`--pairs`、`--config` 也可以用環境變數 `IAT_REGRESS_PAIRS`、`IAT_REGRESS_CONFIG` 指定；`gen_pairs.py` 的樣本資料夾可用 `--samples` 或 `IAT_REGRESS_SAMPLES` 覆寫。
+`--pairs` and `--config` can also be given with the environment variables `IAT_REGRESS_PAIRS` and `IAT_REGRESS_CONFIG`; the sample folder of `gen_pairs.py` can be overridden with `--samples` or `IAT_REGRESS_SAMPLES`.
 
-基準資料（先前保存的 `run_cases.py` 輸出）與對照組都不放進 repo。`full_paths` 與幾個參數錯誤案例的輸出會帶有對照組或案例資料夾的完整路徑；基準若是在別的位置產生後才搬移，用 `--path-map <基準當時的路徑> <這次的路徑>` 把兩邊的同一資料夾換成同一個代號（可重複指定，例如對照組資料夾與執行結果資料夾各一組）。`compare_runs.py` 全部一致時退出碼為 0，否則為 1 並列出差異的案例與欄位。
+Neither the baseline (previously saved `run_cases.py` output) nor the pairs are committed to the repo. The output of `full_paths` and a few argument-error cases contains the full path of the pairs folder or the case folder; if the baseline was produced elsewhere and moved afterwards, use `--path-map <path at baseline time> <path this time>` to replace the same folder on both sides with the same token (repeatable, e.g. one pair for the pairs folder and one for the run output folder). `compare_runs.py` exits with 0 when everything matches, otherwise with 1 and lists the differing cases and fields.
 
-`--path-map` 的第一個路徑是基準**產生當時**記錄在輸出裡的路徑，不是基準目前所在的位置；基準資料夾之後再搬移，這個值不變，只有這次的路徑（第二個）要跟著調整。
+The first path of `--path-map` is the path recorded in the output **when the baseline was produced**, not the baseline's current location; if the baseline folder is moved later, this value stays the same and only the path for this run (the second one) needs to change.
 
-對照組必須和基準一起保存。`gen_pairs.py` 重新產生的 PNG 帶有 ImageMagick 寫入的產生時間（tIME 與 `date:create`、`date:modify`、`date:timestamp`），雜湊與時間 metadata 都會不同，不能拿來和舊基準比對；遺失對照組時，要用新的對照組重新建立基準。
+The pairs must be kept together with the baseline. PNGs regenerated by `gen_pairs.py` carry the generation time written by ImageMagick (tIME and `date:create`, `date:modify`, `date:timestamp`), so both their hashes and their time metadata differ and they cannot be compared against an old baseline; if the pairs are lost, create a new baseline with new pairs.
