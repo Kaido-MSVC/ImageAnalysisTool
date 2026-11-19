@@ -21,6 +21,9 @@
 | serde_json | 1.0.154 | 1.0.154 | MIT OR Apache-2.0 | JSON 報告（鍵排序靠預設的 BTreeMap，不開 `preserve_order`） |
 | sha2 | 0.11.1 | 0.11.1 | MIT OR Apache-2.0 | 輸入檔 SHA-256 |
 | windows-sys | 0.61.2 | 0.61.2 | MIT OR Apache-2.0 | Win32 繫結，只在 `iat-core/src/win.rs` 使用（D-R03） |
+| png | 0.18.1 | 0.18.1 | MIT OR Apache-2.0 | 階段 1：PNG 的 IDAT 解壓、反濾波與 Adam7 列順序，`Transformations::IDENTITY`（D-R11） |
+| miniz_oxide | 0.8.9 | 0.8.9 | MIT OR Zlib OR Apache-2.0 | 階段 1：iCCP／zTXt／iTXt 解壓與 IDAT 串流檢查（區分 Adler-32、損壞、截斷）；與 png 用的是同一版 |
+| crc32fast | 1.5.5 | 1.5.5 | MIT OR Apache-2.0 | 階段 1：PNG chunk CRC（png 也使用） |
 
 windows-sys 啟用的 feature：`Win32_Foundation`、`Win32_Globalization`、`Win32_Storage_FileSystem`、`Win32_System_Console`、`Win32_System_Diagnostics_Debug`、`Win32_Security_Cryptography`。
 
@@ -28,8 +31,10 @@ windows-sys 啟用的 feature：`Win32_Foundation`、`Win32_Globalization`、`Wi
 
 block-buffer 0.12.1、cfg-if 1.0.5、const-oid 0.10.3、cpufeatures 0.3.1、crypto-common 0.2.2、digest 0.11.3、hybrid-array 0.4.15、itoa 1.0.19、libc 0.2.191、memchr 2.8.3、proc-macro2 1.0.107、quote 1.0.47、serde_core 1.0.229、serde_derive 1.0.229、syn 3.0.10、typenum 1.20.1、unicode-ident 1.0.27、windows-link 0.2.1、zmij 1.0.23。
 
-`cargo deny check`（advisories、bans、licenses、sources）全部通過。
+階段 1 新增（2026-11-20，png 0.18.1 帶入）：adler2 2.0.1（0BSD OR MIT OR Apache-2.0）、bitflags 2.13.2、fdeflate 0.3.7、flate2 1.1.11（MIT OR Apache-2.0）、miniz_oxide 0.9.1（經 flate2）、simd-adler32 0.3.10（MIT）。Cargo.lock 裡的 zlib-rs 是 flate2 的選用功能，沒有啟用、不會編譯。
+
+`cargo deny check`（advisories、bans、licenses、sources）全部通過。唯一的警告是 miniz_oxide 有兩個版本（png 直接用 0.8.9，png 依賴的 flate2 用 0.9.1），不改 png 就無法消除，屬於預期內。
 
 ## 尚未加入（規劃書已選定）
 
-png、image-webp、tiff、jxl、rav1d、slint、rfd 依各階段加入；apeireth-image-psd、avif-parse 等對照用 crate 只放 dev-dependencies。
+image-webp、tiff、jxl、rav1d、slint、rfd 依各階段加入；apeireth-image-psd、avif-parse 等對照用 crate 只放 dev-dependencies。
