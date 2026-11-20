@@ -269,6 +269,25 @@ WebP 前端照 C++ 版：
 - image-webp 的實際用量不同：記憶體裡有 VP8L 內容的一份複本、整張 RGBA 輸出（4 B/px）和解碼器內部的 ARGB 緩衝。
 - Rust 版沒有 Job Object（D-R02），這個預估只用來判定，不是硬上限。
 
+### D-R16 PSD／PSB：支援範圍同 C++ 版 1.0.0，擴充延到 2.0.0（2026-11-20，階段 3）
+
+`psd_scan` 與 `psd_side` 逐行移植 C++ 版，支援範圍也一樣：
+- 合併影像（composite）的 Raw 與 RLE（PackBits）。
+- Bitmap、灰階、Indexed、RGB 的 8／16 位元（Bitmap 為 1 位元）。
+- PSB 的大尺寸：每邊最多 300000，64 位元區段長度，32 位元 RLE 列位元組數。
+- ZIP 與帶預測的 ZIP 回報 `compression_not_supported`；CMYK、32 位元與其他色彩模式回報 `unsupported_sample_model`，和 C++ 版一樣。
+- 比對腳本的 25 個 PSD／PSB 案例全部和 C++ 版一致。
+
+階段 3 的提示詞原本列了 ZIP、帶預測的 ZIP、CMYK、32 位元，經使用者確認是誤寫，以 C++ 1.0.0 的行為為準。
+- **這些擴充延到 Rust 版以 2.0.0 接手之後，當成新功能處理**，屆時用 apeireth-image-psd 交叉驗證。
+- 這次刻意不做，以免和 C++ 版的問題代碼不一致。
+
+**交叉比對**：apeireth-image-psd 2.0.0-rc.5 只放在 iat-core 的 dev-dependencies（`default-features = false`，沒有其他依賴）。`crates/iat-core/tests/psd_cross.rs` 依這次的支援範圍產生 13 張合成影像，用 apeireth-image-psd 的 `encode_planes` 編碼合併影像資料，再分別用 iat-core（`decode_for_view`，和分析用的是同一個前端）與 apeireth-image-psd 的 `ImageData::decode` 解出，逐個樣本比較。全部一致。
+- 涵蓋 RGB 8／16 位元 Raw 與 RLE、灰階、Bitmap、Indexed。
+- PSB 比 PSD 上限 30000 更寬或更高的影像。
+
+C++ 版的訊息 `image resource 0x<id> name runs past the resource section` 在 `0x` 後面印的是十進位的 id，照抄以保持一致。
+
 ## 允許的差異
 
 比對腳本讀這張表；表格以外的差異一律算失敗。欄位為 JSON 的點路徑，或 `exit`、`stderr`、`markdown`；可用 `*` 萬用字元。
