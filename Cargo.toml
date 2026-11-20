@@ -13,6 +13,8 @@ publish = false
 # 版本變更要同步記在 docs/dependencies.md。
 [workspace.dependencies]
 iat-core = { path = "crates/iat-core" }
+# 只放 dev-dependencies：PSD／PSB 的交叉比對（規劃書，D-R16）
+apeireth-image-psd = { version = "2.0.0-rc.5", default-features = false }
 image-webp = "0.2.4"
 crc32fast = "1.5.5"
 miniz_oxide = "0.8.9"

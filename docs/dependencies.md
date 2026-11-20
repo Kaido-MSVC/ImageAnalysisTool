@@ -38,6 +38,12 @@ block-buffer 0.12.1、cfg-if 1.0.5、const-oid 0.10.3、cpufeatures 0.3.1、cryp
 
 `cargo deny check`（advisories、bans、licenses、sources）全部通過。唯一的警告是 miniz_oxide 有兩個版本（png 直接用 0.8.9，png 依賴的 flate2 用 0.9.1），不改 png 就無法消除，屬於預期內。
 
+## dev-dependencies
+
+| crate | 宣告 | Cargo.lock | 授權 | 用途 |
+|---|---|---|---|---|
+| apeireth-image-psd | 2.0.0-rc.5（`default-features = false`） | 2.0.0-rc.5 | Apache-2.0 OR MIT | 只在 iat-core 的測試使用：PSD／PSB 合成影像的編碼與交叉比對（D-R16）；關掉 default feature 後沒有其他依賴 |
+
 ## GUI（階段 2，2026-11-20，只有 iat-gui 使用）
 
 | crate | 宣告 | Cargo.lock | 授權 | 用途 |
@@ -56,4 +62,4 @@ GUI 帶入約 290 個間接依賴（全部是純 Rust，沒有 C/C++ 預建檔�
 
 ## 尚未加入（規劃書已選定）
 
-image-webp、tiff、jxl、rav1d 依各階段加入；apeireth-image-psd、avif-parse 等對照用 crate 只放 dev-dependencies。
+image-webp、tiff、jxl、rav1d 依各階段加入；avif-parse 等對照用 crate 只放 dev-dependencies。

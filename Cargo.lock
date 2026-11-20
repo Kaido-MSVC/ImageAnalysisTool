@@ -212,6 +212,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "940b3a0ca603d1eade50a4846a2afffd5ef57a9feac2c0e2ec2e14f9ead76000"
 
 [[package]]
+name = "apeireth-image-psd"
+version = "2.0.0-rc.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1b86e6ced043aafd4acaf79c9c90bae7304b5e03d026b6aaaabf36c682adac32"
+dependencies = [
+ "flate2",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "arboard"
 version = "3.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2049,6 +2059,7 @@ dependencies = [
 name = "iat-core"
 version = "0.1.0"
 dependencies = [
+ "apeireth-image-psd",
  "crc32fast",
  "image-webp",
  "miniz_oxide 0.8.9",
