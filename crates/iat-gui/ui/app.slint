@@ -1,6 +1,66 @@
 // iat GUI。字串原文為英文，以 @tr() 包住；翻譯在 lang/<語系>/LC_MESSAGES/iat-gui.po（不使用預設翻譯 context）。
 import { Button, ComboBox, ProgressIndicator, ListView, Slider, AboutSlint, Palette, VerticalBox, HorizontalBox, ScrollView } from "std-widgets.slint";
 
+// 報告裡的固定狀態值（英文代碼）依介面語言顯示；報告與 JSON 本身維持原文。不認得的值照原文顯示。
+export global Words {
+    public pure function status(s: string) -> string {
+        if (s == "equal") { return @tr("equal"); }
+        if (s == "differs") { return @tr("differs"); }
+        if (s == "not_comparable") { return @tr("not comparable"); }
+        if (s == "not_compared") { return @tr("not compared"); }
+        if (s == "incomplete") { return @tr("incomplete"); }
+        if (s == "decode_incomplete") { return @tr("decode incomplete"); }
+        if (s == "geometry_differs") { return @tr("geometry differs"); }
+        if (s == "orientation_differs") { return @tr("orientation differs"); }
+        if (s == "orientation_unparseable") { return @tr("orientation unparseable"); }
+        if (s == "orientation_unknown") { return @tr("orientation unknown"); }
+        if (s == "sample_model_changed") { return @tr("sample model changed"); }
+        if (s == "bit_depth_changed") { return @tr("bit depth changed"); }
+        if (s == "unknown") { return @tr("unknown"); }
+        if (s == "unverified") { return @tr("unverified"); }
+        if (s == "unreadable") { return @tr("unreadable"); }
+        if (s == "missing_on_original") { return @tr("missing on original"); }
+        if (s == "missing_on_output") { return @tr("missing on output"); }
+        if (s == "both_absent") { return @tr("both absent"); }
+        if (s == "both_synthesized") { return @tr("both synthesized"); }
+        if (s == "synthesized_vs_absent") { return @tr("synthesized vs absent"); }
+        if (s == "same") { return @tr("same"); }
+        if (s == "changed") { return @tr("changed"); }
+        if (s == "added") { return @tr("added"); }
+        if (s == "removed") { return @tr("removed"); }
+        if (s == "parse_failed") { return @tr("parse failed"); }
+        if (s == "over_limit") { return @tr("over limit"); }
+        if (s == "complete") { return @tr("complete"); }
+        if (s == "partial") { return @tr("partial"); }
+        if (s == "failed") { return @tr("failed"); }
+        if (s == "not_checked") { return @tr("not checked"); }
+        if (s == "unsupported") { return @tr("unsupported"); }
+        if (s == "input_open_failed") { return @tr("input open failed"); }
+        if (s == "environment_error") { return @tr("environment error"); }
+        if (s == "unknown_format") { return @tr("unknown format"); }
+        if (s == "format_not_supported_in_this_build") { return @tr("format not supported in this build"); }
+        if (s == "match") { return @tr("match"); }
+        if (s == "mismatch") { return @tr("mismatch"); }
+        if (s == "indeterminate") { return @tr("indeterminate"); }
+        if (s == "not_evaluated") { return @tr("not evaluated"); }
+        if (s == "strict_match") { return @tr("strict match"); }
+        if (s == "strict_mismatch") { return @tr("strict mismatch"); }
+        if (s == "inspect_complete") { return @tr("inspect complete"); }
+        if (s == "container_warning") { return @tr("container warning"); }
+        if (s == "metadata_parse_failed") { return @tr("metadata parse failed"); }
+        if (s == "metadata_over_limit") { return @tr("metadata over limit"); }
+        if (s == "metadata_unverified") { return @tr("metadata unverified"); }
+        if (s == "unsupported_or_not_checked") { return @tr("unsupported or not checked"); }
+        if (s == "decode_or_structure_failure") { return @tr("decode or structure failure"); }
+        if (s == "cancelled") { return @tr("cancelled"); }
+        if (s == "deadline") { return @tr("deadline"); }
+        if (s == "resource_limit") { return @tr("resource limit"); }
+        if (s == "run_error") { return @tr("run error"); }
+        if (s == "inspect_mode") { return @tr("inspect mode"); }
+        return s;
+    }
+}
+
 export struct IssueRow {
     severity: string,
     code: string,
@@ -8,20 +68,39 @@ export struct IssueRow {
     message: string,
 }
 
-// 結果摘要；狀態字串是報告裡的原值（英文代碼，與 JSON 相同）。
+export struct FileInfo {
+    name: string,
+    format: string,
+    // 位元組數（十進位字串）
+    size: string,
+    // 例如 37×29；沒有尺寸時為空字串
+    dims: string,
+    decode-status: string,
+    decode-reason: string,
+}
+
+export struct MetaRow {
+    name: string,
+    status: string,
+}
+
+// 結果摘要；狀態字串是報告裡的原值（英文代碼，與 JSON 相同），顯示時才經 Words 翻譯。
 export struct ResultInfo {
     compare: bool,
     exit-code: int,
     exit-reason: string,
     strict: string,
-    strict-reasons: string,
-    samples: string,
-    color: string,
-    metadata: string,
-    original-name: string,
-    original-detail: string,
-    output-name: string,
-    output-detail: string,
+    // strict 判定的原因代碼
+    strict-reasons: [string],
+    samples-status: string,
+    samples-reason: string,
+    color-status: string,
+    // 判定依據的說明（英文自由文字，不翻譯）
+    color-basis: string,
+    // 狀態不是 same／both_absent 的 metadata 項目
+    metadata: [MetaRow],
+    original: FileInfo,
+    output: FileInfo,
     run-id: string,
 }
 
@@ -230,7 +309,7 @@ component Verdict inherits VerticalLayout {
             : info.exit-code == 4 ? @tr("Stopped by a resource limit, the deadline or cancellation.")
             : @tr("An input could not be read, or the environment failed.");
     }
-    Secondary { text: @tr("Exit code {} ({}) · strict: {}", info.exit-code, info.exit-reason, info.strict); }
+    Secondary { text: @tr("Exit code {} ({}) · strict: {}", info.exit-code, Words.status(info.exit-reason), Words.status(info.strict)); }
 }
 
 component KeyValue inherits HorizontalLayout {
@@ -239,6 +318,14 @@ component KeyValue inherits HorizontalLayout {
     spacing: 12px;
     Secondary { text: root.key; width: 110px; vertical-alignment: top; font-size: 13px; }
     Text { text: root.value == "" ? "—" : root.value; wrap: word-wrap; horizontal-stretch: 1; }
+}
+
+component FileLine inherits KeyValue {
+    in property <FileInfo> file;
+    property <string> decode: file.decode-status == "" ? "" : file.decode-reason == "" ? Words.status(file.decode-status)
+        : Words.status(file.decode-status) + " (" + Words.status(file.decode-reason) + ")";
+    value: file.name + "  " + (file.format == "" ? "" : file.format + " · ") + @tr("{} bytes", file.size)
+        + (file.dims == "" ? "" : " · " + file.dims) + (decode == "" ? "" : " · " + @tr("decode {}", decode));
 }
 
 component ResultsPage inherits VerticalLayout {
@@ -256,12 +343,34 @@ component ResultsPage inherits VerticalLayout {
     Verdict { info: root.info; }
     VerticalLayout {
         spacing: 4px;
-        KeyValue { key: @tr("Original"); value: info.original-name + "  " + info.original-detail; }
-        if info.compare: KeyValue { key: @tr("Output"); value: info.output-name + "  " + info.output-detail; }
-        if info.compare: KeyValue { key: @tr("Samples"); value: info.samples; }
-        if info.compare: KeyValue { key: @tr("Colour"); value: info.color; }
-        if info.compare: KeyValue { key: @tr("Metadata"); value: info.metadata; }
-        if info.strict-reasons != "": KeyValue { key: @tr("Reasons"); value: info.strict-reasons; }
+        FileLine { key: @tr("Original"); file: info.original; }
+        if info.compare: FileLine { key: @tr("Output"); file: info.output; }
+        if info.compare: KeyValue {
+            key: @tr("Samples");
+            value: info.samples-reason == "" ? Words.status(info.samples-status)
+                : Words.status(info.samples-status) + " (" + Words.status(info.samples-reason) + ")";
+        }
+        if info.compare: KeyValue {
+            key: @tr("Colour");
+            value: info.color-basis == "" ? Words.status(info.color-status) : Words.status(info.color-status) + " (" + info.color-basis + ")";
+        }
+        if info.compare && info.metadata.length == 0: KeyValue { key: @tr("Metadata"); value: Words.status("same"); }
+        if info.compare && info.metadata.length > 0: HorizontalLayout {
+            spacing: 12px;
+            Secondary { text: @tr("Metadata"); width: 110px; vertical-alignment: top; font-size: 13px; }
+            VerticalLayout {
+                horizontal-stretch: 1;
+                for m in info.metadata: Text { text: m.name + ": " + Words.status(m.status); }
+            }
+        }
+        if info.strict-reasons.length > 0: HorizontalLayout {
+            spacing: 12px;
+            Secondary { text: @tr("Reasons"); width: 110px; vertical-alignment: top; font-size: 13px; }
+            VerticalLayout {
+                horizontal-stretch: 1;
+                for reason in info.strict-reasons: Text { text: Words.status(reason); }
+            }
+        }
     }
     SectionTitle { text: @tr("Issues ({})", root.issues.length); }
     Rectangle {
@@ -290,8 +399,9 @@ component ResultsPage inherits VerticalLayout {
                 VerticalLayout {
                     horizontal-stretch: 1;
                     spacing: 2px;
-                    Secondary { text: row.code + " · " + row.scope; }
-                    Text { text: row.message; wrap: word-wrap; }
+                    // 取消：畫面上換成翻譯過的說明（報告裡仍是 core 的原文）
+                    Secondary { text: (row.code == "cancelled" ? @tr("Cancelled") : row.code) + " · " + row.scope; }
+                    Text { text: row.code == "cancelled" ? @tr("The analysis was cancelled.") : row.message; wrap: word-wrap; }
                 }
             }
         }
@@ -319,6 +429,8 @@ component ViewerPage inherits VerticalLayout {
     // 0 未載入、1 載入中、2 可檢視、3 錯誤
     in property <int> state;
     in property <string> error-text;
+    // 1：超過檢視上限（error-text 為尺寸）
+    in property <int> error-kind;
     in property <bool> has-output;
     // 0 可用、1 尺寸不同、2 只有一個檔案
     in property <int> diff-state;
@@ -402,7 +514,9 @@ component ViewerPage inherits VerticalLayout {
         if root.state != 2: Rectangle {
             background: Tone.dark ? #1b1b1b : #e6e6e6;
             Text {
-                text: root.state == 1 ? @tr("Decoding the images for viewing…") : root.state == 3 ? @tr("The images cannot be shown: {}", root.error-text) : "";
+                text: root.state == 1 ? @tr("Decoding the images for viewing…")
+                    : root.state == 3 && root.error-kind == 1 ? @tr("This image ({}) is too large to view. The result and the report export are not affected.", root.error-text)
+                    : root.state == 3 ? @tr("The images cannot be shown: {}", root.error-text) : "";
                 color: root.state == 3 ? Tone.bad : Tone.muted;
                 wrap: word-wrap;
                 horizontal-alignment: center;
@@ -473,6 +587,7 @@ export component AppWindow inherits Window {
 
     in property <int> view-state;
     in property <string> view-error;
+    in property <int> view-error-kind;
     in property <bool> view-has-output;
     in property <int> view-diff-state;
     in property <[image]> img-original;
@@ -560,6 +675,7 @@ export component AppWindow inherits Window {
             vertical-stretch: 1;
             state: root.view-state;
             error-text: root.view-error;
+            error-kind: root.view-error-kind;
             has-output: root.view-has-output;
             diff-state: root.view-diff-state;
             img-original: root.img-original;

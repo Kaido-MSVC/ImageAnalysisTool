@@ -197,3 +197,177 @@ msgstr "影像"
 
 msgid "About"
 msgstr "關於"
+
+msgid "equal"
+msgstr "相同"
+
+msgid "differs"
+msgstr "不同"
+
+msgid "not comparable"
+msgstr "無法比較"
+
+msgid "not compared"
+msgstr "未比較"
+
+msgid "incomplete"
+msgstr "不完整"
+
+msgid "decode incomplete"
+msgstr "解碼不完整"
+
+msgid "geometry differs"
+msgstr "尺寸不同"
+
+msgid "orientation differs"
+msgstr "方向不同"
+
+msgid "orientation unparseable"
+msgstr "方向資訊無法解析"
+
+msgid "orientation unknown"
+msgstr "方向不明"
+
+msgid "sample model changed"
+msgstr "樣本模型改變"
+
+msgid "bit depth changed"
+msgstr "位元深度改變"
+
+msgid "unknown"
+msgstr "不明"
+
+msgid "unverified"
+msgstr "未驗證"
+
+msgid "unreadable"
+msgstr "無法讀取"
+
+msgid "missing on original"
+msgstr "原檔沒有"
+
+msgid "missing on output"
+msgstr "輸出檔沒有"
+
+msgid "both absent"
+msgstr "兩邊都沒有"
+
+msgid "both synthesized"
+msgstr "兩邊都是推定值"
+
+msgid "synthesized vs absent"
+msgstr "推定值與未宣告"
+
+msgid "same"
+msgstr "相同"
+
+msgid "changed"
+msgstr "已變更"
+
+msgid "added"
+msgstr "新增"
+
+msgid "removed"
+msgstr "移除"
+
+msgid "parse failed"
+msgstr "解析失敗"
+
+msgid "over limit"
+msgstr "超過上限"
+
+msgid "complete"
+msgstr "完整"
+
+msgid "partial"
+msgstr "部分"
+
+msgid "failed"
+msgstr "失敗"
+
+msgid "not checked"
+msgstr "未檢查"
+
+msgid "unsupported"
+msgstr "不支援"
+
+msgid "input open failed"
+msgstr "無法開啟輸入檔"
+
+msgid "environment error"
+msgstr "環境錯誤"
+
+msgid "unknown format"
+msgstr "未知格式"
+
+msgid "format not supported in this build"
+msgstr "這個版本不支援此格式"
+
+msgid "match"
+msgstr "一致"
+
+msgid "mismatch"
+msgstr "不一致"
+
+msgid "indeterminate"
+msgstr "無法判定"
+
+msgid "not evaluated"
+msgstr "未評估"
+
+msgid "strict match"
+msgstr "嚴格一致"
+
+msgid "strict mismatch"
+msgstr "嚴格不一致"
+
+msgid "inspect complete"
+msgstr "檢查完成"
+
+msgid "container warning"
+msgstr "容器有警告"
+
+msgid "metadata parse failed"
+msgstr "中繼資料解析失敗"
+
+msgid "metadata over limit"
+msgstr "中繼資料超過上限"
+
+msgid "metadata unverified"
+msgstr "中繼資料未驗證"
+
+msgid "unsupported or not checked"
+msgstr "不支援或未檢查"
+
+msgid "decode or structure failure"
+msgstr "解碼或結構失敗"
+
+msgid "cancelled"
+msgstr "已取消"
+
+msgid "deadline"
+msgstr "超過時間期限"
+
+msgid "resource limit"
+msgstr "超過資源上限"
+
+msgid "run error"
+msgstr "執行錯誤"
+
+msgid "{} bytes"
+msgstr "{} 位元組"
+
+msgid "decode {}"
+msgstr "解碼 {}"
+
+msgid "Cancelled"
+msgstr "已取消"
+
+msgid "The analysis was cancelled."
+msgstr "已取消這次分析。"
+
+msgid "This image ({}) is too large to view. The result and the report export are not affected."
+msgstr "這張影像（{}）太大，無法檢視。結果與匯出報告不受影響。"
+
+msgid "inspect mode"
+msgstr "單檔檢查模式"

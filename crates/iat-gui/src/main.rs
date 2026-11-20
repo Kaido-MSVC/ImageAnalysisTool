@@ -25,7 +25,7 @@ mod ui {
     #![allow(clippy::let_underscore_must_use)]
     slint::include_modules!();
 }
-use ui::{AppWindow, IssueRow, ResultInfo};
+use ui::{AppWindow, FileInfo, IssueRow, MetaRow, ResultInfo};
 
 /// 匯出結果的代碼（對應 app.slint 的 export-status）。
 mod export_status {
@@ -118,45 +118,40 @@ impl Progress for GuiProgress {
     }
 }
 
-fn file_detail(f: &FileReport) -> String {
-    let mut parts = vec![f.format.clone(), format!("{} bytes", f.size_bytes.0)];
-    if f.width > 0 {
-        parts.push(format!("{}×{}", f.width, f.height));
+fn file_info(f: &FileReport) -> FileInfo {
+    FileInfo {
+        name: f.name.as_str().into(),
+        format: f.format.as_str().into(),
+        size: f.size_bytes.0.to_string().into(),
+        dims: if f.width > 0 { format!("{}×{}", f.width, f.height).into() } else { SharedString::new() },
+        decode_status: f.decode_status.as_str().into(),
+        decode_reason: f.decode_status_reason.as_str().into(),
     }
-    if !f.decode_status.is_empty() {
-        parts.push(format!("decode {}", f.decode_status));
-    }
-    parts.retain(|p| !p.is_empty());
-    parts.join(" · ")
-}
-
-fn status_text(status: &str, detail: &str) -> String {
-    if detail.is_empty() { status.to_string() } else { format!("{status} ({detail})") }
 }
 
 fn result_info(r: &Report) -> ResultInfo {
-    let changed: Vec<String> = r
+    let metadata: Vec<MetaRow> = r
         .metadata
         .fields
         .iter()
         .filter(|f| f.status != "same" && f.status != "both_absent")
-        .map(|f| format!("{} {}", f.name, f.status))
+        .map(|f| MetaRow { name: f.name.as_str().into(), status: f.status.as_str().into() })
         .collect();
-    let metadata = if changed.is_empty() { "same".to_string() } else { changed.join(", ") };
-    let out = r.output.as_ref();
     ResultInfo {
         compare: r.mode == "compare",
         exit_code: r.exit.code,
         exit_reason: r.exit.reason.as_str().into(),
         strict: r.strict.result.as_str().into(),
-        strict_reasons: r.strict.reasons.join(", ").into(),
-        samples: status_text(&r.samples.status, &r.samples.reason).into(),
-        color: status_text(&r.color.status, &r.color.basis).into(),
-        metadata: metadata.into(),
-        original_name: r.original.name.as_str().into(),
-        original_detail: file_detail(&r.original).into(),
-        output_name: out.map(|o| o.name.clone()).unwrap_or_default().into(),
-        output_detail: out.map(file_detail).unwrap_or_default().into(),
+        strict_reasons: ModelRc::new(VecModel::from(
+            r.strict.reasons.iter().map(|s| SharedString::from(s.as_str())).collect::<Vec<_>>(),
+        )),
+        samples_status: r.samples.status.as_str().into(),
+        samples_reason: r.samples.reason.as_str().into(),
+        color_status: r.color.status.as_str().into(),
+        color_basis: r.color.basis.as_str().into(),
+        metadata: ModelRc::new(VecModel::from(metadata)),
+        original: file_info(&r.original),
+        output: r.output.as_ref().map(file_info).unwrap_or_default(),
         run_id: r.run_id.as_str().into(),
     }
 }
@@ -297,8 +292,14 @@ fn enter_viewer(ui: &AppWindow) {
             }
             with_state(|s| s.view_loading = None);
             match res {
+                Err(iat_core::ViewError::OverViewLimit { width, height }) => {
+                    ui.set_view_state(view_state::ERROR);
+                    ui.set_view_error_kind(1);
+                    ui.set_view_error(format!("{width}×{height}").into());
+                }
                 Err(e) => {
                     ui.set_view_state(view_state::ERROR);
+                    ui.set_view_error_kind(0);
                     ui.set_view_error(e.to_string().into());
                 }
                 Ok(v) => show_view(&ui, key, v),

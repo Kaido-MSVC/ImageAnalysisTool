@@ -197,3 +197,177 @@ msgstr "画像"
 
 msgid "About"
 msgstr "このアプリについて"
+
+msgid "equal"
+msgstr "一致"
+
+msgid "differs"
+msgstr "差異あり"
+
+msgid "not comparable"
+msgstr "比較不可"
+
+msgid "not compared"
+msgstr "未比較"
+
+msgid "incomplete"
+msgstr "不完全"
+
+msgid "decode incomplete"
+msgstr "デコード不完全"
+
+msgid "geometry differs"
+msgstr "サイズが異なる"
+
+msgid "orientation differs"
+msgstr "向きが異なる"
+
+msgid "orientation unparseable"
+msgstr "向き情報を解析できない"
+
+msgid "orientation unknown"
+msgstr "向きが不明"
+
+msgid "sample model changed"
+msgstr "サンプルモデルが変化"
+
+msgid "bit depth changed"
+msgstr "ビット深度が変化"
+
+msgid "unknown"
+msgstr "不明"
+
+msgid "unverified"
+msgstr "未検証"
+
+msgid "unreadable"
+msgstr "読み取り不可"
+
+msgid "missing on original"
+msgstr "元ファイルにない"
+
+msgid "missing on output"
+msgstr "出力ファイルにない"
+
+msgid "both absent"
+msgstr "どちらにもない"
+
+msgid "both synthesized"
+msgstr "どちらも推定値"
+
+msgid "synthesized vs absent"
+msgstr "推定値と未指定"
+
+msgid "same"
+msgstr "同じ"
+
+msgid "changed"
+msgstr "変更あり"
+
+msgid "added"
+msgstr "追加"
+
+msgid "removed"
+msgstr "削除"
+
+msgid "parse failed"
+msgstr "解析失敗"
+
+msgid "over limit"
+msgstr "上限超過"
+
+msgid "complete"
+msgstr "完了"
+
+msgid "partial"
+msgstr "一部のみ"
+
+msgid "failed"
+msgstr "失敗"
+
+msgid "not checked"
+msgstr "未検査"
+
+msgid "unsupported"
+msgstr "非対応"
+
+msgid "input open failed"
+msgstr "入力ファイルを開けない"
+
+msgid "environment error"
+msgstr "環境エラー"
+
+msgid "unknown format"
+msgstr "不明な形式"
+
+msgid "format not supported in this build"
+msgstr "このビルドでは非対応の形式"
+
+msgid "match"
+msgstr "一致"
+
+msgid "mismatch"
+msgstr "不一致"
+
+msgid "indeterminate"
+msgstr "判定不能"
+
+msgid "not evaluated"
+msgstr "未評価"
+
+msgid "strict match"
+msgstr "厳密に一致"
+
+msgid "strict mismatch"
+msgstr "厳密には不一致"
+
+msgid "inspect complete"
+msgstr "検査完了"
+
+msgid "container warning"
+msgstr "コンテナに警告あり"
+
+msgid "metadata parse failed"
+msgstr "メタデータの解析失敗"
+
+msgid "metadata over limit"
+msgstr "メタデータが上限超過"
+
+msgid "metadata unverified"
+msgstr "メタデータ未検証"
+
+msgid "unsupported or not checked"
+msgstr "非対応または未検査"
+
+msgid "decode or structure failure"
+msgstr "デコードまたは構造の異常"
+
+msgid "cancelled"
+msgstr "キャンセル済み"
+
+msgid "deadline"
+msgstr "制限時間超過"
+
+msgid "resource limit"
+msgstr "リソース上限超過"
+
+msgid "run error"
+msgstr "実行エラー"
+
+msgid "{} bytes"
+msgstr "{} バイト"
+
+msgid "decode {}"
+msgstr "デコード {}"
+
+msgid "Cancelled"
+msgstr "キャンセル済み"
+
+msgid "The analysis was cancelled."
+msgstr "分析をキャンセルしました。"
+
+msgid "This image ({}) is too large to view. The result and the report export are not affected."
+msgstr "この画像（{}）は大きすぎて表示できません。結果とレポートのエクスポートには影響しません。"
+
+msgid "inspect mode"
+msgstr "単独検査モード"
