@@ -16,6 +16,8 @@ pub mod markdown;
 pub mod paths;
 pub mod png_scan;
 pub mod png_side;
+pub mod psd_scan;
+pub mod psd_side;
 pub mod report;
 pub mod run;
 pub mod sniff;

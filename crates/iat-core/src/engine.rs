@@ -214,7 +214,7 @@ fn new_side<'a>(
 
 /// 這個版本有前端（掃描與解碼器）的格式。
 pub(crate) fn has_frontend(format: &str) -> bool {
-    matches!(format, "png" | "webp")
+    matches!(format, "png" | "webp" | "psd" | "psb")
 }
 
 fn prepare_side<'a>(s: &mut Side<'a>, issues: &mut Vec<Issue>, lim: &Limits) {
@@ -225,6 +225,8 @@ fn prepare_side<'a>(s: &mut Side<'a>, issues: &mut Vec<Issue>, lim: &Limits) {
         s.dec = crate::png_side::prepare_png(st, issues, lim);
     } else if st.rep.format == "webp" {
         s.dec = crate::webp_side::prepare_webp(st, issues, lim);
+    } else if st.rep.format == "psd" || st.rep.format == "psb" {
+        s.dec = crate::psd_side::prepare_psd(st, issues, lim);
     } else {
         let t0 = Instant::now();
         st.rep.container_status = "unverified".into();
