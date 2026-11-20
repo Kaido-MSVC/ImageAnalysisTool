@@ -13,6 +13,7 @@ py -3.13 -I tests\compare\compare_iat.py `
 - 比對前去掉：`run_id`、`tool`（名稱、版本、編譯器）、`codecs`、`metrics`、`settings.temp.free_bytes_at_start`；文字裡的 run id 與各側的案例目錄也遮罩。
 - 允許的差異只看 `docs/decisions.md`「允許的差異」表格；表格以外的差異一律失敗。
 - 結果表寫在 `<out>/diff-table.md`。退出碼 0 表示所有「不需解碼」案例，以及 `--accept` 指定格式的「本階段」案例都一致（允許差異算一致）。階段 1 用 `--accept png`；其他格式的案例只列出供參考。
+- Markdown 比對前換回 C++ 版的值時，也會替換經過 Markdown 跳脫的形式（同 core 的 `md_escape`），例如 `BITSTREAM\_ERROR`。
 - 允許差異表的欄位樣式中 `[` 是字面字元，只有 `*`、`?` 是萬用字元；已允許的 JSON 字串差異在 Markdown 比對前會換回 C++ 版的值（D-R08）。
 - `--only <regex>` 只跑名稱符合的案例；`--no-cancel` 跳過需要 16 GiB 稀疏檔的取消案例。
 - 用到硬連結，`--out` 建議放在 NTFS 磁碟上。

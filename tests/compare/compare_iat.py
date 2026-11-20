@@ -276,12 +276,21 @@ def json_of(res):
     return raw.decode("utf-8") if raw is not None else None
 
 
+def md_escape(t):
+    """與 iat-core markdown::md_escape 的固定跳脫字元相同（行首字元的規則在表格內用不到）。"""
+    return "".join("\\" + ch if ch in "\\`*_[]<>|~" else ch for ch in t)
+
+
 def tolerate_md(lines, diffs, c):
     """Rust Markdown with allowed JSON string differences put back to the C++ value, so a difference
     already allowed in the JSON (e.g. decode_path) does not hide every later Markdown line."""
-    subs = sorted({rv: cv for f, cv, rv in diffs
-                   if allowed(c.name, f) and isinstance(cv, str) and isinstance(rv, str) and len(rv) >= 4
-                   and rv != cv}.items(), key=lambda s: -len(s[0]))
+    pairs = {rv: cv for f, cv, rv in diffs
+             if allowed(c.name, f) and isinstance(cv, str) and isinstance(rv, str) and len(rv) >= 4 and rv != cv}
+    # Markdown 表格裡的字串經過跳脫（core 的 md_escape）：跳脫後的形式也要換回 C++ 版跳脫後的值。
+    for rv, cv in list(pairs.items()):
+        if md_escape(rv) != rv or md_escape(cv) != cv:
+            pairs[md_escape(rv)] = md_escape(cv)
+    subs = sorted(pairs.items(), key=lambda s: -len(s[0]))
     out = []
     for line in lines:
         for rv, cv in subs:
