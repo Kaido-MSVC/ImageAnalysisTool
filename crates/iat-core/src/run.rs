@@ -4,6 +4,7 @@
 //! 與 C++ 版的主要差別：引擎在同一程序內執行，沒有 iat-worker.exe 與 Job Object
 //! （見 docs/decisions.md D-R02）；取消與期限在引擎的列與列之間檢查。
 
+use std::fmt;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
 use std::os::windows::fs::OpenOptionsExt;
@@ -141,7 +142,7 @@ fn prepare_temp(req: &RunRequest, run_id: &str) -> TempInfo {
     }
     match RunTemp::create(&dir, run_id) {
         Ok(f) => t.files = Some(f),
-        Err(e) => t.error = Some(e),
+        Err(e) => t.error = Some(e.to_string()),
     }
     t
 }
@@ -406,35 +407,109 @@ fn finish_report(req: &RunRequest, mut r: Report, t_all: Instant) -> Report {
     r
 }
 
+/// 報告目標不合格的原因；Display 的文字與 C++ 版 `validate_report_targets` 相同。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ReportTargetError {
+    /// 兩份報告指到同一個檔案
+    SamePath,
+    /// 報告路徑就是某個輸入檔
+    IsInput(PathBuf),
+    /// 報告已存在（絕不覆寫）
+    AlreadyExists(PathBuf),
+    /// 報告所在的目錄不存在
+    DirectoryMissing(PathBuf),
+}
+
+impl fmt::Display for ReportTargetError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::SamePath => f.write_str("report paths refer to the same file"),
+            Self::IsInput(p) => write!(f, "report path is an input file: {}", p.to_string_lossy()),
+            Self::AlreadyExists(p) => write!(f, "report already exists (never overwritten): {}", p.to_string_lossy()),
+            Self::DirectoryMissing(p) => write!(f, "report directory does not exist: {}", p.to_string_lossy()),
+        }
+    }
+}
+
+impl std::error::Error for ReportTargetError {}
+
 /// 報告目標必須是既有目錄下的新檔，且不能和任何輸入或另一份報告相同。
-/// 錯誤訊息與 C++ 版 `validate_report_targets` 相同。
+///
+/// # Errors
+///
+/// 第一個不合格的目標，見 [`ReportTargetError`]。
 pub fn validate_report_targets(
     req: &RunRequest,
     report_md: Option<&Path>,
     report_json: Option<&Path>,
-) -> Result<(), String> {
+) -> Result<(), ReportTargetError> {
     let reports: Vec<&Path> = [report_md, report_json].into_iter().flatten().collect();
     if reports.len() == 2 && same_path(reports[0], reports[1]) {
-        return Err("report paths refer to the same file".into());
+        return Err(ReportTargetError::SamePath);
     }
     for rp in reports {
-        let shown = rp.to_string_lossy();
         if same_path(rp, &req.original) || req.output.as_deref().is_some_and(|o| same_path(rp, o)) {
-            return Err(format!("report path is an input file: {shown}"));
+            return Err(ReportTargetError::IsInput(rp.to_path_buf()));
         }
         if win::path_exists(rp) {
-            return Err(format!("report already exists (never overwritten): {shown}"));
+            return Err(ReportTargetError::AlreadyExists(rp.to_path_buf()));
         }
         let parent = parent_dir_of(rp);
         if !is_directory(&parent) {
-            return Err(format!("report directory does not exist: {}", parent.to_string_lossy()));
+            return Err(ReportTargetError::DirectoryMissing(parent));
         }
     }
     Ok(())
 }
 
+/// 報告暫存檔沒能刪掉（留在磁碟上，使用者要知道）。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CleanupFailure {
+    pub tmp: PathBuf,
+    /// Win32 錯誤碼
+    pub code: u32,
+}
+
+/// 寫報告檔失敗的原因（Win32 錯誤碼）；Display 的文字與 C++ 版 `write_new_file` 相同，
+/// 暫存檔刪除失敗時再附加一段（D-R13）。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WriteReportError {
+    /// 建立同目錄的暫存檔失敗
+    CreateTemp { code: u32 },
+    /// 寫入或 flush 失敗
+    Write { code: u32, cleanup: Option<CleanupFailure> },
+    /// 改名時目標已經出現（不覆寫）
+    TargetExists { code: u32, cleanup: Option<CleanupFailure> },
+    /// 其他改名失敗
+    Rename { code: u32, cleanup: Option<CleanupFailure> },
+}
+
+impl fmt::Display for WriteReportError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let (what, code, cleanup) = match self {
+            Self::CreateTemp { code } => ("cannot create temporary file: ", *code, None),
+            Self::Write { code, cleanup } => ("write failed: ", *code, cleanup.as_ref()),
+            Self::TargetExists { code, cleanup } => {
+                ("target appeared meanwhile, not overwritten: ", *code, cleanup.as_ref())
+            }
+            Self::Rename { code, cleanup } => ("rename failed: ", *code, cleanup.as_ref()),
+        };
+        write!(f, "{what}{}", win::error_text(code))?;
+        if let Some(c) = cleanup {
+            write!(f, "; temporary file not removed: {} ({})", c.tmp.to_string_lossy(), win::error_text(c.code))?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for WriteReportError {}
+
 /// 先寫入同目錄的暫存檔並 flush，再以不取代既有檔的方式改名：既有目標絕不覆寫。
-pub fn write_new_file(target: &Path, data: &[u8], run_id: &str) -> Result<(), String> {
+///
+/// # Errors
+///
+/// 見 [`WriteReportError`]；失敗時目標檔不會被建立或修改。
+pub fn write_new_file(target: &Path, data: &[u8], run_id: &str) -> Result<(), WriteReportError> {
     let full = full_path(target);
     let mut tmp_name = full.clone().into_os_string();
     tmp_name.push(format!(".iat-tmp-{}", run_id_prefix(run_id)));
@@ -444,35 +519,26 @@ pub fn write_new_file(target: &Path, data: &[u8], run_id: &str) -> Result<(), St
         .create_new(true)
         .share_mode(0)
         .open(&tmp)
-        .map_err(|e| format!("cannot create temporary file: {}", win::error_text(win::os_code(&e))))?;
+        .map_err(|e| WriteReportError::CreateTemp { code: win::os_code(&e) })?;
     let written = f.write_all(data).and_then(|()| f.sync_all());
     drop(f);
     if let Err(e) = written {
-        let msg = format!("write failed: {}", win::error_text(win::os_code(&e)));
-        return Err(with_cleanup(msg, &tmp, std::fs::remove_file(&tmp)));
+        let cleanup = cleanup_failure(&tmp, std::fs::remove_file(&tmp));
+        return Err(WriteReportError::Write { code: win::os_code(&e), cleanup });
     }
-    if let Err(e) = win::move_no_replace(&tmp, &full) {
-        let what = if e == ERROR_ALREADY_EXISTS || e == ERROR_FILE_EXISTS {
-            "target appeared meanwhile, not overwritten: "
+    if let Err(code) = win::move_no_replace(&tmp, &full) {
+        let cleanup = cleanup_failure(&tmp, std::fs::remove_file(&tmp));
+        return Err(if code == ERROR_ALREADY_EXISTS || code == ERROR_FILE_EXISTS {
+            WriteReportError::TargetExists { code, cleanup }
         } else {
-            "rename failed: "
-        };
-        let msg = format!("{what}{}", win::error_text(e));
-        return Err(with_cleanup(msg, &tmp, std::fs::remove_file(&tmp)));
+            WriteReportError::Rename { code, cleanup }
+        });
     }
     Ok(())
 }
 
-/// 刪除報告暫存檔失敗時，把這件事附加到原本的錯誤訊息（暫存檔留在磁碟上，使用者要知道）。
-fn with_cleanup(msg: String, tmp: &Path, removed: io::Result<()>) -> String {
-    match removed {
-        Ok(()) => msg,
-        Err(e) => format!(
-            "{msg}; temporary file not removed: {} ({})",
-            tmp.to_string_lossy(),
-            win::error_text(win::os_code(&e))
-        ),
-    }
+fn cleanup_failure(tmp: &Path, removed: io::Result<()>) -> Option<CleanupFailure> {
+    removed.err().map(|e| CleanupFailure { tmp: tmp.to_path_buf(), code: win::os_code(&e) })
 }
 
 #[cfg(test)]
@@ -521,11 +587,12 @@ mod tests {
 
     #[test]
     fn cleanup_failure_is_appended() {
-        let tmp = Path::new(r"C:\x\r.json.iat-tmp-1");
-        assert_eq!(with_cleanup("write failed".into(), tmp, Ok(())), "write failed");
-        let m = with_cleanup("write failed".into(), tmp, Err(io::Error::from_raw_os_error(5)));
-        assert!(m.starts_with("write failed; temporary file not removed: "), "{m}");
-        assert!(m.contains("r.json.iat-tmp-1") && m.ends_with("(5: Access is denied.)"), "{m}");
+        let tmp = Path::new("r.json.iat-tmp-1");
+        assert_eq!(cleanup_failure(tmp, Ok(())), None);
+        let cleanup = cleanup_failure(tmp, Err(io::Error::from_raw_os_error(5)));
+        let m = WriteReportError::Write { code: 112, cleanup }.to_string();
+        assert!(m.starts_with("write failed: 112: "), "{m}");
+        assert!(m.ends_with("; temporary file not removed: r.json.iat-tmp-1 (5: Access is denied.)"), "{m}");
     }
 
     #[test]
@@ -535,7 +602,8 @@ mod tests {
         let target = dir.join("報告 一.json");
         write_new_file(&target, b"first", "12345678-x").unwrap();
         let e = write_new_file(&target, b"second", "abcdefgh-x").unwrap_err();
-        assert!(e.starts_with("target appeared meanwhile, not overwritten: "), "{e}");
+        assert!(matches!(e, WriteReportError::TargetExists { cleanup: None, .. }), "{e:?}");
+        assert!(e.to_string().starts_with("target appeared meanwhile, not overwritten: "), "{e}");
         assert_eq!(std::fs::read(&target).unwrap(), b"first");
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1, "no temporary file left behind");
         std::fs::remove_dir_all(&dir).unwrap();

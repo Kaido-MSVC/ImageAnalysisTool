@@ -308,6 +308,30 @@ pub fn remove_stale(dir: &Path) -> u32 {
     n
 }
 
+/// 建立這次的暫存檔失敗（Win32 錯誤碼）；Display 的文字與 C++ 版相同。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CreateTempError {
+    /// 磁碟已滿或超過磁碟配額（換一個 --temp-dir 可能就好）
+    NoSpace { code: u32 },
+    /// 其他原因（權限、路徑等）
+    Failed { code: u32 },
+}
+
+impl CreateTempError {
+    fn from_code(code: u32) -> Self {
+        if is_space_error(code) { Self::NoSpace { code } } else { Self::Failed { code } }
+    }
+}
+
+impl fmt::Display for CreateTempError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let (Self::NoSpace { code } | Self::Failed { code }) = self;
+        write!(f, "cannot create a temporary file: {}", win::error_text(*code))
+    }
+}
+
+impl std::error::Error for CreateTempError {}
+
 /// 這次執行的兩個暫存檔。
 pub struct RunTemp {
     pub paths: [PathBuf; 2],
@@ -315,7 +339,12 @@ pub struct RunTemp {
 }
 
 impl RunTemp {
-    pub fn create(dir: &Path, run_id: &str) -> Result<Self, String> {
+    /// 建立兩個 delete-on-close 暫存檔。
+    ///
+    /// # Errors
+    ///
+    /// 任一個建立失敗時回傳 [`CreateTempError`]；已建立的那個隨 handle 關閉而刪除。
+    pub fn create(dir: &Path, run_id: &str) -> Result<Self, CreateTempError> {
         let mut t = Self { paths: [PathBuf::new(), PathBuf::new()], files: [None, None] };
         for (i, side) in ["a", "b"].into_iter().enumerate() {
             let p = dir.join(format!("{TEMP_PREFIX}{run_id}-{side}.bin"));
@@ -327,7 +356,7 @@ impl RunTemp {
                 .attributes(FILE_ATTRIBUTE_TEMPORARY | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED)
                 .custom_flags(FILE_FLAG_DELETE_ON_CLOSE)
                 .open(&p)
-                .map_err(|e| format!("cannot create a temporary file: {}", win::error_text(win::os_code(&e))))?;
+                .map_err(|e| CreateTempError::from_code(win::os_code(&e)))?;
             t.paths[i] = p;
             t.files[i] = Some(f);
         }

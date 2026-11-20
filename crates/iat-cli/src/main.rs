@@ -92,7 +92,7 @@ fn parse_args(argv: &[OsString]) -> Result<Args, String> {
                         break;
                     }
                     i += 1;
-                    limits.set(&a)?;
+                    limits.set(&a).map_err(|e| e.to_string())?;
                     any = true;
                 }
                 if !any {

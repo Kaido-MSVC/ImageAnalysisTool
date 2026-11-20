@@ -27,9 +27,13 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
+pub use limits::LimitError;
 pub use limits::Limits;
 pub use report::{Report, report_json_text};
-pub use run::{RunRequest, run_analysis, validate_report_targets, write_new_file};
+pub use run::{
+    CleanupFailure, ReportTargetError, RunRequest, WriteReportError, run_analysis, validate_report_targets,
+    write_new_file,
+};
 
 /// 工具版本（workspace 的 version，單一來源）。
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

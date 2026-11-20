@@ -1,6 +1,34 @@
 //! 資源上限（對應 C++ 版 `src/common/limits.hpp`）。每個上限都是有限值，沒有「無上限」。
 
+use std::fmt;
+
 use crate::report::LimitSettings;
+
+/// `--limits name=value` 的解析錯誤；Display 的文字與 C++ 版相同。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LimitError {
+    /// 沒有 `=`
+    Syntax(String),
+    /// 值不是 1..12 位數的十進位整數
+    NotPositiveInteger(String),
+    /// 不認得的上限名稱
+    UnknownName(String),
+    /// 超出允許範圍
+    OutOfRange { name: String, min: u64, max: u64 },
+}
+
+impl fmt::Display for LimitError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Syntax(a) => write!(f, "expected name=value: {a}"),
+            Self::NotPositiveInteger(a) => write!(f, "value must be a positive integer: {a}"),
+            Self::UnknownName(n) => write!(f, "unknown limit: {n}"),
+            Self::OutOfRange { name, min, max } => write!(f, "{name} must be between {min} and {max}"),
+        }
+    }
+}
+
+impl std::error::Error for LimitError {}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {
@@ -38,15 +66,19 @@ impl Default for Limits {
 pub const CODEC_RESERVE: u64 = 64 << 20;
 
 impl Limits {
-    /// 解析 `name=value`；錯誤訊息與 C++ 版相同。
-    pub fn set(&mut self, assignment: &str) -> Result<(), String> {
+    /// 解析 `name=value`。
+    ///
+    /// # Errors
+    ///
+    /// 格式、數值或名稱不對，或超出範圍時回傳 [`LimitError`]。
+    pub fn set(&mut self, assignment: &str) -> Result<(), LimitError> {
         let Some((name, val)) = assignment.split_once('=') else {
-            return Err(format!("expected name=value: {assignment}"));
+            return Err(LimitError::Syntax(assignment.into()));
         };
         if val.is_empty() || val.len() > 12 || !val.bytes().all(|b| b.is_ascii_digit()) {
-            return Err(format!("value must be a positive integer: {assignment}"));
+            return Err(LimitError::NotPositiveInteger(assignment.into()));
         }
-        let v: u64 = val.parse().map_err(|_| format!("value must be a positive integer: {assignment}"))?;
+        let v: u64 = val.parse().map_err(|_| LimitError::NotPositiveInteger(assignment.into()))?;
         let (field, lo, hi): (&mut u64, u64, u64) = match name {
             "job_commit_mib" => (&mut self.job_commit_mib, 16, 1 << 20),
             "buffer_mib" => (&mut self.buffer_mib, 1, 1 << 16),
@@ -54,10 +86,10 @@ impl Limits {
             "metadata_file_mib" => (&mut self.metadata_file_mib, 1, 4096),
             "temp_gib" => (&mut self.temp_gib, 1, 1 << 16),
             "deadline_s" => (&mut self.deadline_s, 1, 7 * 24 * 3600),
-            _ => return Err(format!("unknown limit: {name}")),
+            _ => return Err(LimitError::UnknownName(name.into())),
         };
         if v < lo || v > hi {
-            return Err(format!("{name} must be between {lo} and {hi}"));
+            return Err(LimitError::OutOfRange { name: name.into(), min: lo, max: hi });
         }
         *field = v;
         Ok(())
@@ -98,15 +130,18 @@ mod tests {
         let mut l = Limits::default();
         assert_eq!(l.set("buffer_mib=8"), Ok(()));
         assert_eq!(l.buffer_mib, 8);
-        assert_eq!(l.set("deadline_s=0").unwrap_err(), "deadline_s must be between 1 and 604800");
-        assert_eq!(l.set("buffer_mib").unwrap_err(), "expected name=value: buffer_mib");
-        assert_eq!(l.set("buffer_mib=-1").unwrap_err(), "value must be a positive integer: buffer_mib=-1");
+        assert_eq!(l.set("deadline_s=0").unwrap_err().to_string(), "deadline_s must be between 1 and 604800");
+        assert_eq!(l.set("buffer_mib").unwrap_err().to_string(), "expected name=value: buffer_mib");
+        assert_eq!(l.set("buffer_mib=-1").unwrap_err().to_string(), "value must be a positive integer: buffer_mib=-1");
         assert_eq!(
-            l.set("buffer_mib=1234567890123").unwrap_err(),
+            l.set("buffer_mib=1234567890123").unwrap_err().to_string(),
             "value must be a positive integer: buffer_mib=1234567890123"
         );
-        assert_eq!(l.set("foo=1").unwrap_err(), "unknown limit: foo");
-        assert_eq!(l.set("job_commit_mib=15").unwrap_err(), "job_commit_mib must be between 16 and 1048576");
+        assert_eq!(l.set("foo=1").unwrap_err().to_string(), "unknown limit: foo");
+        assert_eq!(
+            l.set("job_commit_mib=15").unwrap_err().to_string(),
+            "job_commit_mib must be between 16 and 1048576"
+        );
     }
 
     #[test]
