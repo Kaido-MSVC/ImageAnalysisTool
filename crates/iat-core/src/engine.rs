@@ -15,7 +15,7 @@ use crate::report::{
     ChannelStat, Count, DiffEntry, FileReport, Issue, MetaItem, MetadataField, PairStatus, Report, ResourceNeed, code,
 };
 use crate::sniff::sniff_format;
-use crate::temp::{TempError, TempFile, TempQuota};
+use crate::temp::{TempError, TempErrorKind, TempFile, TempQuota};
 use crate::text::short_hash;
 use crate::{CancelToken, Mode, ms_since};
 
@@ -27,8 +27,9 @@ const METADATA_FIELDS: [&str; 9] =
 
 pub struct AnalysisInput<'a> {
     pub mode: Mode,
-    pub original: &'a File,
-    pub output: Option<&'a File>,
+    /// 開檔階段已取得大小與檔頭的輸入
+    pub original: &'a Input<'a>,
+    pub output: Option<&'a Input<'a>>,
     pub limits: Limits,
     /// 兩側各一個暫存檔（delete-on-close）；建立失敗時外層已經停止
     pub temp: [Option<&'a File>; 2],
@@ -98,7 +99,7 @@ pub trait Decoder<'a> {
 pub fn temp_failure(s: &mut SideState<'_>, issues: &mut Vec<Issue>, e: &TempError) {
     s.failed = true;
     s.rep.decode_status = "not_checked".into();
-    if e.kind == "quota" || e.kind == "disk" {
+    if matches!(e.kind, TempErrorKind::Quota | TempErrorKind::Disk) {
         s.rep.decode_status_reason = "resource_limit".into();
         issues.push(Issue::new(code::RESOURCE_LIMIT, "error", s.scope, format!("temporary storage: {}", e.message)));
     } else {
@@ -168,9 +169,19 @@ pub fn suggest_limit_mib(needed: u64, reserve: u64, step_mib: u64, max_mib: u64)
 
 struct Side<'a> {
     st: SideState<'a>,
+    /// 仍可解碼的解碼器；格式不支援或已停用時為 None
     dec: Option<Box<dyn Decoder<'a> + 'a>>,
-    /// 格式支援且可以開始解碼
-    decodable: bool,
+    /// 被預算或 open() 擋下的解碼器，只留著做記憶體統計
+    stopped: Option<Box<dyn Decoder<'a> + 'a>>,
+}
+
+impl Side<'_> {
+    /// 停用解碼器（之後不再解碼），保留它供記憶體統計。
+    fn stop(&mut self) {
+        if let Some(d) = self.dec.take() {
+            self.stopped = Some(d);
+        }
+    }
 }
 
 fn new_side<'a>(
@@ -195,16 +206,14 @@ fn new_side<'a>(
             quota: Rc::clone(quota),
         },
         dec: None,
-        decodable: false,
+        stopped: None,
     }
 }
 
 fn prepare_side<'a>(s: &mut Side<'a>, issues: &mut Vec<Issue>, lim: &Limits) {
     let st = &mut s.st;
     st.rep.size_bytes = Count(st.input.size());
-    let mut head = [0u8; 64];
-    let n = st.input.read_at(0, &mut head).unwrap_or(0);
-    st.rep.format = sniff_format(&head[..n]).to_string();
+    st.rep.format = sniff_format(st.input.head()).to_string();
     if st.rep.format == "png" {
         s.dec = crate::png_side::prepare_png(st, issues, lim);
     } else {
@@ -223,7 +232,6 @@ fn prepare_side<'a>(s: &mut Side<'a>, issues: &mut Vec<Issue>, lim: &Limits) {
         ));
         st.scan_ms = ms_since(t0);
     }
-    s.decodable = s.dec.is_some();
 }
 
 #[derive(Default)]
@@ -251,11 +259,9 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Outcome {
     r.codecs.insert(crate::png_side::DECODER_NAME.into(), crate::png_side::DECODER_VERSION.into());
 
     let quota = Rc::new(RefCell::new(TempQuota::new(lim.temp_gib << 30, input.temp_free_bytes)));
-    let in_a = Input::new(input.original);
-    let in_b = input.output.map(Input::new);
     let mut issues: Vec<Issue> = Vec::new();
-    let mut a = new_side("original", &in_a, input.temp[0], &quota);
-    let mut b = in_b.as_ref().map(|i| new_side("output", i, input.temp[1], &quota));
+    let mut a = new_side("original", input.original, input.temp[0], &quota);
+    let mut b = input.output.map(|i| new_side("output", i, input.temp[1], &quota));
     prepare_side(&mut a, &mut issues, lim);
     if let Some(b) = b.as_mut() {
         prepare_side(b, &mut issues, lim);
@@ -265,10 +271,8 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Outcome {
     let mut need: u64 = 0;
     let mut overflow = false;
     for s in std::iter::once(&mut a).chain(b.as_mut()) {
-        if !s.decodable {
-            continue;
-        }
-        match s.dec.as_ref().and_then(|d| d.buffer_estimate()).and_then(|e| need.checked_add(e)) {
+        let Some(dec) = s.dec.as_ref() else { continue };
+        match dec.buffer_estimate().and_then(|e| need.checked_add(e)) {
             Some(n) => need = n,
             None => {
                 overflow = true;
@@ -281,10 +285,10 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Outcome {
         let sug = if overflow { None } else { suggest_limit_mib(need, 0, 16, 1 << 16) };
         let arg = sug.map(|v| format!("--limits buffer_mib={v}")).unwrap_or_default();
         for s in std::iter::once(&mut a).chain(b.as_mut()) {
-            if !s.decodable {
+            if s.dec.is_none() {
                 continue;
             }
-            s.decodable = false;
+            s.stop();
             s.st.rep.decode_status = "not_checked".into();
             s.st.rep.decode_status_reason = "resource_limit".into();
             if !overflow {
@@ -320,10 +324,8 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Outcome {
     let pct = lim.test_codec_estimate_pct;
     let mut codec_need_peak = 0u64;
     for s in std::iter::once(&mut a).chain(b.as_mut()) {
-        if !s.decodable {
-            continue;
-        }
-        let est = s.dec.as_ref().and_then(|d| d.codec_estimate());
+        let Some(dec) = s.dec.as_ref() else { continue };
+        let est = dec.codec_estimate();
         if est == Some(0) {
             continue;
         }
@@ -332,7 +334,7 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Outcome {
         match with_rows {
             Some(w) if w <= lim.codec_cap_bytes() => codec_need_peak = codec_need_peak.max(w),
             _ => {
-                s.decodable = false;
+                s.stop();
                 s.st.rep.decode_status = "not_checked".into();
                 s.st.rep.decode_status_reason = "resource_limit".into();
                 let sug = with_rows.and_then(|w| suggest_limit_mib(w, CODEC_RESERVE, 256, 1 << 20));
@@ -370,13 +372,11 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Outcome {
     }
 
     for s in std::iter::once(&mut a).chain(b.as_mut()) {
-        if s.decodable {
-            let dec = s.dec.as_mut().expect("decodable sides have a decoder");
-            if dec.open(&mut s.st, &mut issues, lim) {
-                s.st.canon = vec![0; s.st.width as usize * s.st.layout.channels as usize];
-            } else {
-                s.decodable = false;
-            }
+        let Some(dec) = s.dec.as_mut() else { continue };
+        if dec.open(&mut s.st, &mut issues, lim) {
+            s.st.canon = vec![0; s.st.width as usize * s.st.layout.channels as usize];
+        } else {
+            s.stop();
         }
     }
 
@@ -385,7 +385,7 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Outcome {
     let mut comparable = false;
     if let Some(b) = b.as_ref() {
         let (oa, ob) = (&a.st.rep, &b.st.rep);
-        comparable = a.decodable && b.decodable;
+        comparable = a.dec.is_some() && b.dec.is_some();
         if oa.width != ob.width || oa.height != ob.height {
             not_cmp_reason = code::GEOMETRY_DIFFERS;
         } else if oa.orientation.source == "unparseable" || ob.orientation.source == "unparseable" {
@@ -433,7 +433,10 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Outcome {
     let mut stats = Stats::default();
     let mut names: &[&str] = &[];
     let (mut a_alpha, mut b_alpha): (Option<usize>, Option<usize>) = (None, None);
-    if comparable && let Some(b) = b.as_mut() {
+    if comparable
+        && let Some(b) = b.as_mut()
+        && let (Some(dec_a), Some(dec_b)) = (a.dec.as_mut(), b.dec.as_mut())
+    {
         let wide = if has_alpha(a.st.layout.model) { a.st.layout.model } else { b.st.layout.model };
         names = channel_names(wide);
         let n = names.len();
@@ -451,8 +454,8 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Outcome {
             if let Some(o) = stop(input.cancel) {
                 return o;
             }
-            let ra = a.dec.as_mut().expect("decodable").read_row(&mut a.st, &mut issues);
-            let rb = b.dec.as_mut().expect("decodable").read_row(&mut b.st, &mut issues);
+            let ra = dec_a.read_row(&mut a.st, &mut issues);
+            let rb = dec_b.read_row(&mut b.st, &mut issues);
             if !ra || !rb {
                 break;
             }
@@ -494,10 +497,7 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Outcome {
     }
     // 沒有比較（或中途停下）的一側仍然解到最後，才知道它本身是否完整。
     for s in std::iter::once(&mut a).chain(b.as_mut()) {
-        if !s.decodable {
-            continue;
-        }
-        let dec = s.dec.as_mut().expect("decodable");
+        let Some(dec) = s.dec.as_mut() else { continue };
         while !s.st.failed && s.st.rows < s.st.height as u64 {
             if let Some(o) = stop(input.cancel) {
                 return o;
@@ -508,8 +508,8 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Outcome {
         }
     }
     for s in std::iter::once(&mut a).chain(b.as_mut()) {
-        if s.decodable {
-            s.dec.as_mut().expect("decodable").finish(&mut s.st, &mut issues);
+        if let Some(dec) = s.dec.as_mut() {
+            dec.finish(&mut s.st, &mut issues);
         }
     }
     let dec_ms = ms_since(t_dec);
@@ -522,7 +522,7 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Outcome {
         if !not_cmp_reason.is_empty() {
             sc.status = "not_comparable".into();
             sc.reason = not_cmp_reason.into();
-        } else if !a.decodable || !b.decodable || !complete {
+        } else if a.dec.is_none() || b.dec.is_none() || !complete {
             sc.status = if comparable { "incomplete" } else { "not_compared" }.into();
             sc.reason = "decode_incomplete".into();
         } else {
@@ -764,7 +764,7 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Outcome {
     let (mut t_written, mut t_read, mut t_ms) = (0u64, 0u64, 0f64);
     for s in std::iter::once(&a).chain(b.as_ref()) {
         *mem.get_mut("tool_row_buffers").expect("inserted") += s.st.canon.capacity() as u64 * 2;
-        if let Some(d) = &s.dec {
+        if let Some(d) = s.dec.as_ref().or(s.stopped.as_ref()) {
             d.memory_metrics(&mut mem);
         }
         if let Some(t) = &s.st.temp {
@@ -787,7 +787,7 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Outcome {
     if reserved > 0 {
         m.time_ms.insert("temp_io".into(), t_ms);
     }
-    m.io_read_bytes = Some(Count(in_a.bytes_read() + in_b.as_ref().map_or(0, Input::bytes_read)));
+    m.io_read_bytes = Some(Count(input.original.bytes_read() + input.output.map_or(0, Input::bytes_read)));
 
     r.issues = issues;
     r.original = std::mem::take(&mut a.st.rep);

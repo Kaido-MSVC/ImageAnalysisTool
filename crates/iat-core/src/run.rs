@@ -5,7 +5,7 @@
 //! （見 docs/decisions.md D-R02）；取消與期限在引擎的列與列之間檢查。
 
 use std::fs::{File, OpenOptions};
-use std::io::{Read, Write};
+use std::io::{self, Write};
 use std::os::windows::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -16,6 +16,7 @@ use std::time::Duration;
 
 use crate::engine::{AnalysisInput, Outcome, analyze};
 use crate::exit::decide_exit;
+use crate::input::{Input, read_full_at};
 use crate::limits::Limits;
 use crate::paths::{file_name_of, full_path, is_directory, parent_dir_of, same_path, trim_dir};
 use crate::report::{Count, FileReport, Report, TestSettings, code};
@@ -56,33 +57,46 @@ fn open_read_only(p: &Path) -> Result<File, u32> {
     Ok(f)
 }
 
-/// 被取消或讀取失敗時回傳 None（報告的 sha256 留空）。
-fn sha256_file(mut f: &File, size: u64, cancel: &CancelToken, progress: &dyn Progress) -> Option<String> {
+/// 整檔雜湊的結果：取消與讀取失敗要分開處理（取消停在這裡，讀取失敗是輸入錯誤）。
+#[derive(Debug)]
+enum HashOutcome {
+    Done(String),
+    Cancelled,
+    Failed(io::Error),
+}
+
+fn sha256_file(input: &Input<'_>, cancel: &CancelToken, progress: &dyn Progress) -> HashOutcome {
     let mut h = Sha256::new();
     let mut buf = vec![0u8; 4 << 20];
     let mut done = 0u64;
     loop {
         if cancel.is_cancelled() {
-            return None;
+            return HashOutcome::Cancelled;
         }
-        let n = f.read(&mut buf).ok()?;
-        if n == 0 {
-            break;
-        }
+        let n = match read_full_at(input.file(), done, &mut buf) {
+            Ok(0) => break,
+            Ok(n) => n,
+            Err(e) => return HashOutcome::Failed(e),
+        };
         h.update(&buf[..n]);
         done += n as u64;
-        progress.report(Stage::Hash, done, size);
+        progress.report(Stage::Hash, done, input.size());
     }
-    Some(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
+    HashOutcome::Done(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
 
-/// UUID 第 4 版，8-4-4-4-12 小寫十六進位。
-fn new_run_id() -> String {
-    let mut b = win::random_16();
+/// UUID 第 4 版，8-4-4-4-12 小寫十六進位；系統亂數失敗時回傳 NTSTATUS。
+fn new_run_id() -> Result<String, i32> {
+    let mut b = win::random_16()?;
     b[6] = (b[6] & 0x0F) | 0x40;
     b[8] = (b[8] & 0x3F) | 0x80;
     let h: String = b.iter().map(|x| format!("{x:02x}")).collect();
-    format!("{}-{}-{}-{}-{}", &h[0..8], &h[8..12], &h[12..16], &h[16..20], &h[20..])
+    Ok(format!("{}-{}-{}-{}-{}", &h[0..8], &h[8..12], &h[12..16], &h[16..20], &h[20..]))
+}
+
+/// run_id 的前 8 個字元（報告暫存檔名用）；不足 8 個位元組或不在字元邊界時用整個 run_id。
+fn run_id_prefix(run_id: &str) -> &str {
+    run_id.get(..8).unwrap_or(run_id)
 }
 
 fn set_not_checked(f: &mut FileReport, reason: &str) {
@@ -93,39 +107,83 @@ fn set_not_checked(f: &mut FileReport, reason: &str) {
     }
 }
 
+/// 暫存目錄的準備結果。`error` 為 None 時 `files` 一定有值；有錯誤時其餘欄位照樣寫進報告。
+#[derive(Default)]
 struct TempInfo {
     dir: Option<PathBuf>,
     user_specified: bool,
     free_bytes: u64,
     stale_removed: u32,
     files: Option<RunTemp>,
+    error: Option<String>,
 }
 
 /// 暫存目錄、清掉舊的暫存檔、剩餘空間，再建立這次的兩個暫存檔（同 C++ 版 `create_temp`，D-R04）。
-fn prepare_temp(req: &RunRequest, run_id: &str) -> Result<TempInfo, Box<(TempInfo, String)>> {
+fn prepare_temp(req: &RunRequest, run_id: &str) -> TempInfo {
     let user_specified = req.temp_dir.is_some();
     let dir = match &req.temp_dir {
         Some(d) => trim_dir(full_path(d)),
         None => trim_dir(std::env::temp_dir()),
     };
-    let mut t = TempInfo { dir: Some(dir.clone()), user_specified, free_bytes: 0, stale_removed: 0, files: None };
+    let mut t = TempInfo { user_specified, ..TempInfo::default() };
     if dir.as_os_str().is_empty() || !is_directory(&dir) {
-        t.dir = None;
-        return Err(Box::new((t, "temporary directory is not available".into())));
+        t.error = Some("temporary directory is not available".into());
+        return t;
     }
+    t.dir = Some(dir.clone());
     t.stale_removed = temp::remove_stale(&dir);
     match win::disk_free_bytes(&dir) {
         Ok(n) => t.free_bytes = n,
         Err(e) => {
-            let msg = format!("cannot query free space of the temporary directory: {}", win::error_text(e));
-            return Err(Box::new((t, msg)));
+            t.error = Some(format!("cannot query free space of the temporary directory: {}", win::error_text(e)));
+            return t;
         }
     }
     match RunTemp::create(&dir, run_id) {
         Ok(f) => t.files = Some(f),
-        Err(e) => return Err(Box::new((t, e))),
+        Err(e) => t.error = Some(e),
     }
-    Ok(t)
+    t
+}
+
+/// 一個輸入的身分欄位：檔名、大小、雜湊。開檔、取大小、讀檔頭或雜湊讀取失敗都記為
+/// input_open_failed（同 C++ 版開檔失敗的對應：退出碼 5），此時不回傳 Input。
+/// 雜湊時被取消則回傳 Input、sha256 留空，由呼叫者判定取消。
+fn describe_input<'f>(
+    r: &mut Report,
+    req: &RunRequest,
+    which: &str,
+    path: &Path,
+    h: &'f Result<File, u32>,
+    cancel: &CancelToken,
+    progress: &dyn Progress,
+) -> (FileReport, Option<Input<'f>>) {
+    let mut f = FileReport { name: file_name_of(path), ..FileReport::default() };
+    if req.full_paths {
+        f.path = full_path(path).to_string_lossy().into_owned();
+    }
+    let failure = match h {
+        Err(e) => format!("cannot open input: {}", win::error_text(*e)),
+        Ok(file) => match Input::new(file) {
+            Err(e) => format!("cannot read input: {}", win::error_text(win::os_code(&e))),
+            Ok(input) => {
+                f.size_bytes = Count(input.size());
+                match sha256_file(&input, cancel, progress) {
+                    HashOutcome::Done(hex) => {
+                        f.sha256 = hex;
+                        return (f, Some(input));
+                    }
+                    HashOutcome::Cancelled => return (f, Some(input)),
+                    HashOutcome::Failed(e) => {
+                        format!("cannot read input while hashing: {}", win::error_text(win::os_code(&e)))
+                    }
+                }
+            }
+        },
+    };
+    set_not_checked(&mut f, "input_open_failed");
+    r.add_issue(code::INPUT_OPEN_FAILED, "error", which, failure);
+    (f, None)
 }
 
 /// 執行一次分析。輸入、環境的問題（包括取消）一律寫進回傳的報告，
@@ -133,7 +191,15 @@ fn prepare_temp(req: &RunRequest, run_id: &str) -> Result<TempInfo, Box<(TempInf
 pub fn run_analysis(req: &RunRequest, cancel: &CancelToken, progress: &dyn Progress) -> Report {
     let t_all = Instant::now();
 
-    let mut r = Report { run_id: new_run_id(), mode: req.mode.as_str().into(), ..Report::default() };
+    // 系統亂數失敗時 run_id 留空並記為環境錯誤，絕不用固定值代替。
+    let (run_id, run_id_error) = match new_run_id() {
+        Ok(id) => (id, None),
+        Err(st) => (
+            String::new(),
+            Some(format!("cannot generate a run id: BCryptGenRandom failed with NTSTATUS 0x{:08X}", st as u32)),
+        ),
+    };
+    let mut r = Report { run_id, mode: req.mode.as_str().into(), ..Report::default() };
     r.tool.insert("name".into(), "iat".into());
     r.tool.insert("version".into(), crate::VERSION.into());
     r.tool.insert("compiler".into(), crate::COMPILER.into());
@@ -157,34 +223,14 @@ pub fn run_analysis(req: &RunRequest, cancel: &CancelToken, progress: &dyn Progr
     let t_open = Instant::now();
     let fo = open_read_only(&req.original);
     let fp = req.output.as_deref().map(open_read_only);
-    let mut open_failed = false;
-    let mut describe = |r: &mut Report, which: &str, path: &Path, h: &Result<File, u32>| {
-        let mut f = FileReport { name: file_name_of(path), ..FileReport::default() };
-        if req.full_paths {
-            f.path = full_path(path).to_string_lossy().into_owned();
-        }
-        match h {
-            Err(e) => {
-                open_failed = true;
-                set_not_checked(&mut f, "input_open_failed");
-                r.add_issue(
-                    code::INPUT_OPEN_FAILED,
-                    "error",
-                    which,
-                    format!("cannot open input: {}", win::error_text(*e)),
-                );
-            }
-            Ok(file) => {
-                let size = file.metadata().map_or(0, |m| m.len());
-                f.size_bytes = Count(size);
-                f.sha256 = sha256_file(file, size, cancel, progress).unwrap_or_default();
-            }
-        }
-        f
-    };
-    r.original = describe(&mut r, "original", &req.original, &fo);
+    let (rep_o, in_o) = describe_input(&mut r, req, "original", &req.original, &fo, cancel, progress);
+    r.original = rep_o;
+    let mut open_failed = in_o.is_none();
+    let mut in_p = None;
     if let (Some(p), Some(h)) = (req.output.as_deref(), fp.as_ref()) {
-        let out = describe(&mut r, "output", p, h);
+        let (out, input) = describe_input(&mut r, req, "output", p, h, cancel, progress);
+        open_failed |= input.is_none();
+        in_p = input;
         r.output = Some(out);
         if let (Ok(a), Ok(b)) = (&fo, h)
             && let (Some(ia), Some(ib)) = (win::file_identity(a), win::file_identity(b))
@@ -211,16 +257,13 @@ pub fn run_analysis(req: &RunRequest, cancel: &CancelToken, progress: &dyn Progr
     }
 
     // ---- 暫存目錄與暫存檔（C++ 版只在要啟動 worker 時才準備，失敗時位置記為 system_temp）
-    let (mut temp, temp_err) = if open_failed || cancelled_early {
-        (TempInfo { dir: None, user_specified: false, free_bytes: 0, stale_removed: 0, files: None }, None)
+    // 沒有 run_id 就不能建立暫存檔：當作環境錯誤，與暫存目錄失敗一樣停在這裡。
+    let mut temp = if open_failed || cancelled_early {
+        TempInfo::default()
+    } else if let Some(e) = run_id_error {
+        TempInfo { error: Some(e), ..TempInfo::default() }
     } else {
-        match prepare_temp(req, &r.run_id) {
-            Ok(t) => (t, None),
-            Err(b) => {
-                let (t, e) = *b;
-                (t, Some(e))
-            }
-        }
+        prepare_temp(req, &r.run_id)
     };
     r.settings.temp.location = if temp.user_specified { "user_specified" } else { "system_temp" }.into();
     r.settings.temp.free_bytes_at_start = Count(temp.free_bytes);
@@ -236,7 +279,7 @@ pub fn run_analysis(req: &RunRequest, cancel: &CancelToken, progress: &dyn Progr
             format!("{} leftover temporary file(s) of an earlier run removed", temp.stale_removed),
         );
     }
-    if let Some(e) = &temp_err {
+    if let Some(e) = &temp.error {
         set_not_checked(&mut r.original, "environment_error");
         if let Some(o) = r.output.as_mut() {
             set_not_checked(o, "environment_error");
@@ -244,15 +287,18 @@ pub fn run_analysis(req: &RunRequest, cancel: &CancelToken, progress: &dyn Progr
         r.add_issue(code::ENVIRONMENT_ERROR, "error", "run", e.clone());
     }
 
-    if !open_failed && !cancelled_early && temp_err.is_none() {
-        let (Ok(fo), Some(Ok(_)) | None) = (&fo, &fp) else { unreachable!("open failures are handled above") };
+    if !open_failed
+        && !cancelled_early
+        && temp.error.is_none()
+        && let Some(orig) = in_o.as_ref()
+        && let Some(mut files) = temp.files.take()
+    {
         progress.report(Stage::Analyze, 0, 1);
-        let files = temp.files.as_ref().expect("temp files exist when there is no temp error");
         let t_engine = Instant::now();
         let input = AnalysisInput {
             mode: req.mode,
-            original: fo,
-            output: fp.as_ref().and_then(|h| h.as_ref().ok()),
+            original: orig,
+            output: in_p.as_ref(),
             limits: req.limits,
             temp: [files.files[0].as_ref(), files.files[1].as_ref()],
             temp_free_bytes: temp.free_bytes,
@@ -262,7 +308,7 @@ pub fn run_analysis(req: &RunRequest, cancel: &CancelToken, progress: &dyn Progr
         let outcome = analyze(&input);
         r.metrics.time_ms.insert("engine_wall".into(), ms_since(t_engine));
         // 引擎已結束：關閉 handle 就是最後一次關閉，暫存檔此時必須消失。
-        for left in temp.files.as_mut().map(RunTemp::close).unwrap_or_default() {
+        for left in files.close() {
             r.add_issue(
                 code::TEMP_CLEANUP_FAILED,
                 "warning",
@@ -391,7 +437,7 @@ pub fn validate_report_targets(
 pub fn write_new_file(target: &Path, data: &[u8], run_id: &str) -> Result<(), String> {
     let full = full_path(target);
     let mut tmp_name = full.clone().into_os_string();
-    tmp_name.push(format!(".iat-tmp-{}", &run_id[..run_id.len().min(8)]));
+    tmp_name.push(format!(".iat-tmp-{}", run_id_prefix(run_id)));
     let tmp = PathBuf::from(tmp_name);
     let mut f = OpenOptions::new()
         .write(true)
@@ -402,19 +448,31 @@ pub fn write_new_file(target: &Path, data: &[u8], run_id: &str) -> Result<(), St
     let written = f.write_all(data).and_then(|()| f.sync_all());
     drop(f);
     if let Err(e) = written {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(format!("write failed: {}", win::error_text(win::os_code(&e))));
+        let msg = format!("write failed: {}", win::error_text(win::os_code(&e)));
+        return Err(with_cleanup(msg, &tmp, std::fs::remove_file(&tmp)));
     }
     if let Err(e) = win::move_no_replace(&tmp, &full) {
-        let _ = std::fs::remove_file(&tmp);
         let what = if e == ERROR_ALREADY_EXISTS || e == ERROR_FILE_EXISTS {
             "target appeared meanwhile, not overwritten: "
         } else {
             "rename failed: "
         };
-        return Err(format!("{what}{}", win::error_text(e)));
+        let msg = format!("{what}{}", win::error_text(e));
+        return Err(with_cleanup(msg, &tmp, std::fs::remove_file(&tmp)));
     }
     Ok(())
+}
+
+/// 刪除報告暫存檔失敗時，把這件事附加到原本的錯誤訊息（暫存檔留在磁碟上，使用者要知道）。
+fn with_cleanup(msg: String, tmp: &Path, removed: io::Result<()>) -> String {
+    match removed {
+        Ok(()) => msg,
+        Err(e) => format!(
+            "{msg}; temporary file not removed: {} ({})",
+            tmp.to_string_lossy(),
+            win::error_text(win::os_code(&e))
+        ),
+    }
 }
 
 #[cfg(test)]
@@ -423,16 +481,56 @@ mod tests {
 
     #[test]
     fn run_id_is_uuid_v4() {
-        let id = new_run_id();
+        let id = new_run_id().unwrap();
         assert_eq!(id.len(), 36);
         assert_eq!(&id[14..15], "4");
         assert!(matches!(&id[19..20], "8" | "9" | "a" | "b"));
-        assert_ne!(id, new_run_id());
+        assert_ne!(id, new_run_id().unwrap());
+    }
+
+    #[test]
+    fn run_id_prefix_never_splits_a_character() {
+        assert_eq!(run_id_prefix("12345678-x"), "12345678");
+        assert_eq!(run_id_prefix("abc"), "abc");
+        assert_eq!(run_id_prefix(""), "");
+        // 第 8 個位元組落在多位元組字元中間：用整個字串，不 panic
+        assert_eq!(run_id_prefix("1234567\u{e9}9"), "1234567\u{e9}9");
+    }
+
+    #[test]
+    fn hash_reads_whole_file_after_head_and_honours_cancel() {
+        let dir = std::env::temp_dir().join(format!("iat-core-test-{}", new_run_id().unwrap()));
+        std::fs::create_dir(&dir).unwrap();
+        let p = dir.join("abc.bin");
+        std::fs::write(&p, b"abc").unwrap();
+        let f = File::open(&p).unwrap();
+        // Input::new 先讀了檔頭；雜湊仍要從位移 0 開始。
+        let input = Input::new(&f).unwrap();
+        let cancel = CancelToken::new();
+        match sha256_file(&input, &cancel, &crate::NoProgress) {
+            HashOutcome::Done(h) => {
+                assert_eq!(h, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+            }
+            other => panic!("expected Done, got {other:?}"),
+        }
+        cancel.cancel();
+        assert!(matches!(sha256_file(&input, &cancel, &crate::NoProgress), HashOutcome::Cancelled));
+        drop(f);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn cleanup_failure_is_appended() {
+        let tmp = Path::new(r"C:\x\r.json.iat-tmp-1");
+        assert_eq!(with_cleanup("write failed".into(), tmp, Ok(())), "write failed");
+        let m = with_cleanup("write failed".into(), tmp, Err(io::Error::from_raw_os_error(5)));
+        assert!(m.starts_with("write failed; temporary file not removed: "), "{m}");
+        assert!(m.contains("r.json.iat-tmp-1") && m.ends_with("(5: Access is denied.)"), "{m}");
     }
 
     #[test]
     fn write_new_file_never_overwrites() {
-        let dir = std::env::temp_dir().join(format!("iat-core-test-{}", new_run_id()));
+        let dir = std::env::temp_dir().join(format!("iat-core-test-{}", new_run_id().unwrap()));
         std::fs::create_dir(&dir).unwrap();
         let target = dir.join("報告 一.json");
         write_new_file(&target, b"first", "12345678-x").unwrap();

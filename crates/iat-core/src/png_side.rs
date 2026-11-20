@@ -482,10 +482,10 @@ impl<'a> PngDecoder<'a> {
             return false;
         }
         if temp.written() != self.temp_total {
-            let e = crate::temp::TempError {
-                kind: "internal",
-                message: format!("Adam7 passes wrote {} of {} bytes", temp.written(), self.temp_total),
-            };
+            let e = crate::temp::TempError::new(
+                crate::temp::TempErrorKind::Internal,
+                format!("Adam7 passes wrote {} of {} bytes", temp.written(), self.temp_total),
+            );
             temp_failure(s, issues, &e);
             return false;
         }
@@ -525,10 +525,10 @@ impl<'a> PngDecoder<'a> {
             filled += pw as u64;
         }
         if filled != w as u64 {
-            let e = crate::temp::TempError {
-                kind: "internal",
-                message: format!("Adam7 row {y} covered {filled} of {w} columns"),
-            };
+            let e = crate::temp::TempError::new(
+                crate::temp::TempErrorKind::Internal,
+                format!("Adam7 row {y} covered {filled} of {w} columns"),
+            );
             temp_failure(s, issues, &e);
             return false;
         }
@@ -710,10 +710,10 @@ impl<'a> Decoder<'a> for PngDecoder<'a> {
             self.temp_total = total;
             let res = match s.temp.as_mut() {
                 Some(t) => t.reserve(&mut s.quota.borrow_mut(), total),
-                None => Err(crate::temp::TempError {
-                    kind: "unavailable",
-                    message: "no temporary file for this side".into(),
-                }),
+                None => Err(crate::temp::TempError::new(
+                    crate::temp::TempErrorKind::Unavailable,
+                    "no temporary file for this side",
+                )),
             };
             if let Err(e) = res {
                 temp_failure(s, issues, &e);

@@ -9,6 +9,7 @@
 //! 預先配置用 `File::set_len`（C++ 版用 FileAllocationInfo，不改檔案長度）；
 //! 讀取範圍一律以已寫入的長度檢查，所以檔尾的 0 不會被讀到（docs/decisions.md D-R04）。
 
+use std::fmt;
 use std::fs::{File, OpenOptions};
 use std::os::windows::fs::{FileExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
@@ -48,11 +49,13 @@ impl TempQuota {
         Self { limit: limit_bytes, free: free_disk_bytes, reserved: 0 }
     }
 
-    /// 成功時為 None，否則為 "quota" 或 "disk"。
-    fn take(&mut self, n: u64) -> Option<&'static str> {
-        let Some(total) = self.reserved.checked_add(n).filter(|&t| t <= self.limit) else { return Some("quota") };
+    /// 成功時為 None，否則為 [`TempErrorKind::Quota`] 或 [`TempErrorKind::Disk`]。
+    fn take(&mut self, n: u64) -> Option<TempErrorKind> {
+        let Some(total) = self.reserved.checked_add(n).filter(|&t| t <= self.limit) else {
+            return Some(TempErrorKind::Quota);
+        };
         if total.checked_add(DISK_MARGIN).is_none_or(|t| t > self.free) {
-            return Some("disk");
+            return Some(TempErrorKind::Disk);
         }
         self.reserved = total;
         None
@@ -63,18 +66,58 @@ impl TempQuota {
     }
 }
 
+/// 暫存失敗的種類；Display 是報告裡 `temp_<kind>` 原因的字尾。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TempErrorKind {
+    /// 超過 temp_gib 配額
+    Quota,
+    /// 暫存磁碟區空間不足
+    Disk,
+    /// 讀寫暫存檔失敗
+    Io,
+    /// 沒有提供暫存檔
+    Unavailable,
+    /// 工具內部的不一致（超出預留、讀未寫入的範圍等）
+    Internal,
+}
+
+impl TempErrorKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Quota => "quota",
+            Self::Disk => "disk",
+            Self::Io => "io",
+            Self::Unavailable => "unavailable",
+            Self::Internal => "internal",
+        }
+    }
+}
+
+impl fmt::Display for TempErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct TempError {
-    /// quota | disk | io | unavailable | internal
-    pub kind: &'static str,
+    pub kind: TempErrorKind,
     pub message: String,
 }
 
 impl TempError {
-    fn new(kind: &'static str, message: impl Into<String>) -> Self {
+    pub fn new(kind: TempErrorKind, message: impl Into<String>) -> Self {
         Self { kind, message: message.into() }
     }
 }
+
+impl fmt::Display for TempError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for TempError {}
 
 /// 一側的暫存檔（附加模式）。
 pub struct TempFile<'a> {
@@ -105,13 +148,13 @@ impl<'a> TempFile<'a> {
     /// 向配額與剩餘空間預留，再預先配置。
     pub fn reserve(&mut self, quota: &mut TempQuota, bytes: u64) -> Result<(), TempError> {
         let Some(f) = self.file else {
-            return Err(TempError::new("unavailable", "no temporary file was provided to the worker"));
+            return Err(TempError::new(TempErrorKind::Unavailable, "no temporary file was provided to the worker"));
         };
         if self.reserved != 0 {
-            return Err(TempError::new("internal", "temporary file reserved twice"));
+            return Err(TempError::new(TempErrorKind::Internal, "temporary file reserved twice"));
         }
         if let Some(k) = quota.take(bytes) {
-            let msg = if k == "quota" {
+            let msg = if k == TempErrorKind::Quota {
                 format!(
                     "temporary storage needs {bytes} bytes, temp_gib allows {} (already reserved {}; raise with --limits temp_gib=)",
                     quota.limit, quota.reserved
@@ -130,7 +173,7 @@ impl<'a> TempFile<'a> {
         {
             let c = win::os_code(&e);
             self.io_ms += ms(t0);
-            let kind = if is_space_error(c) { "disk" } else { "io" };
+            let kind = if is_space_error(c) { TempErrorKind::Disk } else { TempErrorKind::Io };
             return Err(TempError::new(
                 kind,
                 format!("preallocating temporary storage failed: {}", win::error_text(c)),
@@ -148,12 +191,14 @@ impl<'a> TempFile<'a> {
         let mut done = 0;
         while done < data.len() {
             match f.seek_write(&data[done..], off + done as u64) {
-                Ok(0) => return Err(TempError::new("io", "writing temporary storage failed: 0 bytes written")),
+                Ok(0) => {
+                    return Err(TempError::new(TempErrorKind::Io, "writing temporary storage failed: 0 bytes written"));
+                }
                 Ok(n) => done += n,
                 Err(e) => {
                     let c = win::os_code(&e);
                     self.io_ms += ms(t0);
-                    let kind = if is_space_error(c) { "disk" } else { "io" };
+                    let kind = if is_space_error(c) { TempErrorKind::Disk } else { TempErrorKind::Io };
                     return Err(TempError::new(
                         kind,
                         format!("writing temporary storage failed: {}", win::error_text(c)),
@@ -167,7 +212,7 @@ impl<'a> TempFile<'a> {
 
     pub fn append(&mut self, data: &[u8]) -> Result<(), TempError> {
         if self.written.checked_add(data.len() as u64).is_none_or(|e| e > self.reserved) {
-            return Err(TempError::new("internal", "temporary write beyond the reserved size"));
+            return Err(TempError::new(TempErrorKind::Internal, "temporary write beyond the reserved size"));
         }
         let mut p = data;
         while !p.is_empty() {
@@ -199,7 +244,7 @@ impl<'a> TempFile<'a> {
     /// 只能讀已經寫到磁碟上的範圍。
     pub fn read_at(&mut self, off: u64, data: &mut [u8]) -> Result<(), TempError> {
         if off.checked_add(data.len() as u64).is_none_or(|e| e > self.on_disk) {
-            return Err(TempError::new("internal", "temporary read outside the written range"));
+            return Err(TempError::new(TempErrorKind::Internal, "temporary read outside the written range"));
         }
         let f = self.file.expect("data was written, so the file exists");
         let t0 = Instant::now();
@@ -208,13 +253,16 @@ impl<'a> TempFile<'a> {
             match f.seek_read(&mut data[done..], off + done as u64) {
                 Ok(0) => {
                     self.io_ms += ms(t0);
-                    return Err(TempError::new("io", "reading temporary storage failed: unexpected end of file"));
+                    return Err(TempError::new(
+                        TempErrorKind::Io,
+                        "reading temporary storage failed: unexpected end of file",
+                    ));
                 }
                 Ok(n) => done += n,
                 Err(e) => {
                     self.io_ms += ms(t0);
                     return Err(TempError::new(
-                        "io",
+                        TempErrorKind::Io,
                         format!("reading temporary storage failed: {}", win::error_text(win::os_code(&e))),
                     ));
                 }
@@ -318,17 +366,17 @@ mod tests {
         {
             let mut q = TempQuota::new(10, u64::MAX);
             let mut t = TempFile::new(rt.files[0].as_ref());
-            assert_eq!(t.reserve(&mut q, 11).unwrap_err().kind, "quota");
+            assert_eq!(t.reserve(&mut q, 11).unwrap_err().kind, TempErrorKind::Quota);
             t.reserve(&mut q, 6).unwrap();
             t.append(b"abc").unwrap();
             let mut b = [0u8; 3];
             // 還在緩衝裡，尚未寫到磁碟：不能讀
-            assert_eq!(t.read_at(0, &mut b).unwrap_err().kind, "internal");
+            assert_eq!(t.read_at(0, &mut b).unwrap_err().kind, TempErrorKind::Internal);
             t.flush().unwrap();
             t.read_at(0, &mut b).unwrap();
             assert_eq!(&b, b"abc");
-            assert_eq!(t.read_at(1, &mut b).unwrap_err().kind, "internal");
-            assert_eq!(t.append(b"defg").unwrap_err().kind, "internal");
+            assert_eq!(t.read_at(1, &mut b).unwrap_err().kind, TempErrorKind::Internal);
+            assert_eq!(t.append(b"defg").unwrap_err().kind, TempErrorKind::Internal);
         }
         assert!(rt.close().is_empty(), "delete-on-close removed both files");
     }

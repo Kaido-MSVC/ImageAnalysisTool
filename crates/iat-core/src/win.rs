@@ -106,12 +106,13 @@ pub fn move_no_replace(from: &Path, to: &Path) -> Result<(), u32> {
     if ok != 0 { Ok(()) } else { Err(unsafe { GetLastError() }) }
 }
 
-/// 16 bytes 系統亂數（BCryptGenRandom，系統偏好的 RNG）。
-pub fn random_16() -> [u8; 16] {
+/// 16 bytes 系統亂數（BCryptGenRandom，系統偏好的 RNG）；失敗時回傳 NTSTATUS。
+pub fn random_16() -> Result<[u8; 16], i32> {
     let mut b = [0u8; 16];
     // SAFETY: b 是 16 bytes 可寫緩衝；使用系統偏好 RNG 時演算法 handle 必須為 null。
-    unsafe { BCryptGenRandom(std::ptr::null_mut(), b.as_mut_ptr(), 16, BCRYPT_USE_SYSTEM_PREFERRED_RNG) };
-    b
+    let status = unsafe { BCryptGenRandom(std::ptr::null_mut(), b.as_mut_ptr(), 16, BCRYPT_USE_SYSTEM_PREFERRED_RNG) };
+    // NTSTATUS 小於 0 是錯誤；STATUS_SUCCESS 為 0。
+    if status < 0 { Err(status) } else { Ok(b) }
 }
 
 static CTRL_FLAG: OnceLock<Arc<AtomicBool>> = OnceLock::new();
