@@ -917,6 +917,11 @@ pub(crate) enum ViewStop {
     Cancelled,
     /// 樣本緩衝無法配置（bytes）
     TooLarge(u64),
+    /// 寬×高超過呼叫者給的檢視上限
+    OverViewLimit {
+        width: u32,
+        height: u32,
+    },
 }
 
 /// 把一個輸入整張解碼成正規樣本，供 GUI 檢視；格式不支援或中途失敗時仍回傳已解出的部分與錯誤訊息。
@@ -954,7 +959,7 @@ pub(crate) fn decode_view_samples(
     let total = (row_len as u64).saturating_mul(u64::from(s.st.height));
     let bytes = total.saturating_mul(2);
     if u64::from(s.st.width) * u64::from(s.st.height) > max_pixels {
-        return Err(ViewStop::TooLarge(bytes));
+        return Err(ViewStop::OverViewLimit { width: s.st.width, height: s.st.height });
     }
     let total = usize::try_from(total).map_err(|_| ViewStop::TooLarge(bytes))?;
     out.samples.try_reserve_exact(total).map_err(|_| ViewStop::TooLarge(bytes))?;

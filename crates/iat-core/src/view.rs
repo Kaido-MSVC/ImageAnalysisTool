@@ -52,6 +52,11 @@ pub enum ViewError {
     Temp(String),
     /// 樣本緩衝太大，無法配置（bytes）
     TooLarge(u64),
+    /// 寬×高超過檢視上限（`max_pixels`）；分析與報告不受影響
+    OverViewLimit {
+        width: u32,
+        height: u32,
+    },
     Cancelled,
 }
 
@@ -63,6 +68,7 @@ impl fmt::Display for ViewError {
             Self::Decode(m) => write!(f, "decoding failed: {m}"),
             Self::Temp(m) => write!(f, "temporary storage: {m}"),
             Self::TooLarge(b) => write!(f, "decoded samples need {b} bytes, which cannot be allocated"),
+            Self::OverViewLimit { width, height } => write!(f, "{width}×{height} is larger than the viewing limit"),
             Self::Cancelled => f.write_str("cancelled"),
         }
     }
@@ -71,7 +77,7 @@ impl fmt::Display for ViewError {
 impl std::error::Error for ViewError {}
 
 /// 唯讀開檔並整張解碼。交錯 PNG 需要暫存檔，放在 `temp_dir`（None 為系統暫存目錄）。
-/// 寬×高超過 `max_pixels` 時在配置樣本緩衝前就以 [`ViewError::TooLarge`] 停止。
+/// 寬×高超過 `max_pixels` 時在配置樣本緩衝前就以 [`ViewError::OverViewLimit`] 停止。
 ///
 /// # Errors
 ///
@@ -98,6 +104,7 @@ pub fn decode_for_view(
     let v = res.map_err(|s| match s {
         ViewStop::Cancelled => ViewError::Cancelled,
         ViewStop::TooLarge(b) => ViewError::TooLarge(b),
+        ViewStop::OverViewLimit { width, height } => ViewError::OverViewLimit { width, height },
     })?;
     if v.layout.channels == 0 {
         return Err(if v.format == "png" {
@@ -159,7 +166,7 @@ mod tests {
     fn pixel_cap_stops_before_allocating() {
         let e = decode_for_view(&fixture("png_gray16_trns.png"), None, &Limits::default(), 1, &CancelToken::new())
             .unwrap_err();
-        assert!(matches!(e, ViewError::TooLarge(_)), "{e:?}");
+        assert!(matches!(e, ViewError::OverViewLimit { .. }), "{e:?}");
     }
 
     #[test]
