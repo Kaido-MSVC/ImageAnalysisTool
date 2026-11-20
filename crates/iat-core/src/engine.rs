@@ -925,6 +925,7 @@ pub(crate) fn decode_view_samples(
     temp: Option<&File>,
     temp_free_bytes: u64,
     lim: &Limits,
+    max_pixels: u64,
     cancel: &CancelToken,
 ) -> Result<ViewSamples, ViewStop> {
     let quota = Rc::new(RefCell::new(TempQuota::new(lim.temp_gib << 30, temp_free_bytes)));
@@ -952,6 +953,9 @@ pub(crate) fn decode_view_samples(
     let row_len = s.st.width as usize * s.st.layout.channels as usize;
     let total = (row_len as u64).saturating_mul(u64::from(s.st.height));
     let bytes = total.saturating_mul(2);
+    if u64::from(s.st.width) * u64::from(s.st.height) > max_pixels {
+        return Err(ViewStop::TooLarge(bytes));
+    }
     let total = usize::try_from(total).map_err(|_| ViewStop::TooLarge(bytes))?;
     out.samples.try_reserve_exact(total).map_err(|_| ViewStop::TooLarge(bytes))?;
     s.st.canon = vec![0; row_len];

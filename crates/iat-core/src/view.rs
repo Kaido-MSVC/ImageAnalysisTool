@@ -71,6 +71,7 @@ impl fmt::Display for ViewError {
 impl std::error::Error for ViewError {}
 
 /// 唯讀開檔並整張解碼。交錯 PNG 需要暫存檔，放在 `temp_dir`（None 為系統暫存目錄）。
+/// 寬×高超過 `max_pixels` 時在配置樣本緩衝前就以 [`ViewError::TooLarge`] 停止。
 ///
 /// # Errors
 ///
@@ -79,6 +80,7 @@ pub fn decode_for_view(
     path: &Path,
     temp_dir: Option<&Path>,
     limits: &Limits,
+    max_pixels: u64,
     cancel: &CancelToken,
 ) -> Result<DecodedImage, ViewError> {
     let file = open_read_only(path).map_err(|e| ViewError::Open(win::error_text(e)))?;
@@ -90,7 +92,7 @@ pub fn decode_for_view(
     let free = win::disk_free_bytes(&dir).map_err(|e| ViewError::Temp(win::error_text(e)))?;
     let run_id = crate::run::new_run_id().map_err(|st| ViewError::Temp(format!("NTSTATUS 0x{:08X}", st as u32)))?;
     let mut temp = RunTemp::create(&dir, &run_id).map_err(|e| ViewError::Temp(e.to_string()))?;
-    let res = decode_view_samples(&input, temp.files[0].as_ref(), free, limits, cancel);
+    let res = decode_view_samples(&input, temp.files[0].as_ref(), free, limits, max_pixels, cancel);
     // 關閉即刪除；檢視用的暫存檔留下時只能交給下次執行的舊檔清理。
     temp.close();
     let v = res.map_err(|s| match s {
@@ -129,8 +131,9 @@ mod tests {
 
     #[test]
     fn decodes_png_samples_without_conversion() {
-        let img = decode_for_view(&fixture("png_gray16_trns.png"), None, &Limits::default(), &CancelToken::new())
-            .expect("fixture decodes");
+        let img =
+            decode_for_view(&fixture("png_gray16_trns.png"), None, &Limits::default(), u64::MAX, &CancelToken::new())
+                .expect("fixture decodes");
         assert_eq!(img.bits, 16);
         assert_eq!(img.model, "gray_alpha");
         assert_eq!(img.rows, img.height);
@@ -140,15 +143,29 @@ mod tests {
 
     #[test]
     fn interlaced_png_uses_temp_and_matches_size() {
-        let img = decode_for_view(&fixture("s2_rgba16_37x29_adam7.png"), None, &Limits::default(), &CancelToken::new())
-            .expect("fixture decodes");
+        let img = decode_for_view(
+            &fixture("s2_rgba16_37x29_adam7.png"),
+            None,
+            &Limits::default(),
+            u64::MAX,
+            &CancelToken::new(),
+        )
+        .expect("fixture decodes");
         assert_eq!(img.rows, img.height);
         assert!(img.error.is_none(), "{:?}", img.error);
     }
 
     #[test]
+    fn pixel_cap_stops_before_allocating() {
+        let e = decode_for_view(&fixture("png_gray16_trns.png"), None, &Limits::default(), 1, &CancelToken::new())
+            .unwrap_err();
+        assert!(matches!(e, ViewError::TooLarge(_)), "{e:?}");
+    }
+
+    #[test]
     fn unknown_format_is_unsupported() {
-        let e = decode_for_view(&fixture("manifest.json"), None, &Limits::default(), &CancelToken::new()).unwrap_err();
+        let e = decode_for_view(&fixture("manifest.json"), None, &Limits::default(), u64::MAX, &CancelToken::new())
+            .unwrap_err();
         assert_eq!(e, ViewError::Unsupported("unknown".into()));
     }
 }
