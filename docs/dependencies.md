@@ -35,6 +35,22 @@ block-buffer 0.12.1、cfg-if 1.0.5、const-oid 0.10.3、cpufeatures 0.3.1、cryp
 
 `cargo deny check`（advisories、bans、licenses、sources）全部通過。唯一的警告是 miniz_oxide 有兩個版本（png 直接用 0.8.9，png 依賴的 flate2 用 0.9.1），不改 png 就無法消除，屬於預期內。
 
+## GUI（階段 2，2026-11-20，只有 iat-gui 使用）
+
+| crate | 宣告 | Cargo.lock | 授權 | 用途 |
+|---|---|---|---|---|
+| slint | 1.19.0 | 1.19.0 | GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0，採用免版稅授權 | GUI。`default-features = false`，feature：`std`、`compat-1-2`、`backend-winit`、`renderer-femtovg-wgpu`、`accessibility`、`unstable-winit-030`（D-R14） |
+| slint-build | 1.19.0 | 1.19.0 | 同 slint | build.rs 編譯 `ui/app.slint`，內嵌翻譯（bundled translations） |
+| rfd | 0.18.0 | 0.18.0 | MIT | 開檔／存檔對話方塊 |
+| sys-locale | 0.3.2 | 0.3.2 | MIT OR Apache-2.0 | 依 Windows 顯示語言預選介面語言；Slint 本來就依賴同一版，沒有多拉新 crate |
+
+GUI 帶入約 290 個間接依賴（全部是純 Rust，沒有 C/C++ 預建檔），主要是 wgpu 30.0.2、femtovg 0.28.0、winit 0.30.13 與 i-slint-* 子 crate，完整清單以 Cargo.lock 為準。iat-core 與 iat-cli 的依賴沒有變。
+
+`cargo deny check` 的調整（deny.toml）：
+- 授權：slint、slint-build、slint-macros 與 7 個 i-slint-* crate 逐一列為例外，只允許 `LicenseRef-Slint-Royalty-free-2.0`；義務是關於畫面的 `AboutSlint`。
+- advisories：忽略兩筆「不再維護」通知（不是漏洞），都是 Slint 1.19.0 的間接依賴、沒有可升級的版本：RUSTSEC-2026-0441（pin-utils，經 spin_on，只在建置時使用）、RUSTSEC-2026-0543（chrono，經 i-slint-core）。Slint 升級時重新檢查。
+- bans：多版本警告增加 glow、hashbrown、smol_str、syn、windows-sys，都來自 Slint／wgpu 的依賴樹，屬於預期內。
+
 ## 尚未加入（規劃書已選定）
 
-image-webp、tiff、jxl、rav1d、slint、rfd 依各階段加入；apeireth-image-psd、avif-parse 等對照用 crate 只放 dev-dependencies。
+image-webp、tiff、jxl、rav1d 依各階段加入；apeireth-image-psd、avif-parse 等對照用 crate 只放 dev-dependencies。

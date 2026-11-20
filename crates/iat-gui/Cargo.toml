@@ -1,6 +1,6 @@
 [package]
 name = "iat-gui"
-description = "iat GUI (Slint) — placeholder until stage 2"
+description = "iat GUI (Slint)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,8 +8,18 @@ license.workspace = true
 authors.workspace = true
 publish.workspace = true
 
+[[bin]]
+name = "iat-gui"
+path = "src/main.rs"
+
 [dependencies]
 iat-core.workspace = true
+rfd.workspace = true
+slint.workspace = true
+sys-locale.workspace = true
+
+[build-dependencies]
+slint-build.workspace = true
 
 [lints]
 workspace = true

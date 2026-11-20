@@ -24,11 +24,23 @@ confidence-threshold = 0.93
 # 白名單是政策，不是目前用到的清單：沒用到的項目不警告。
 unused-allowed-license = "allow"
 # 例外只開給特定 crate：
-# - Slint（階段 2 加入）：宣告為 GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0，
+# - Slint（階段 2 已加入）：宣告為 GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0，
 #   採用免版稅授權。加入時把 slint 及其 i-slint-* 子 crate 逐一列出，allow 只放 "LicenseRef-Slint-Royalty-free-2.0"。
 # - MPL-2.0：只允許測試對照用的 dev-dependency（例如 avif-parse），加入時以 crate 名稱個別列出，
 #   並確認它只出現在 [dev-dependencies]。
-exceptions = []
+exceptions = [
+    # Slint 1.19.0（階段 2）：採用免版稅授權，義務是關於畫面的 AboutSlint（D-R14）。
+    { crate = "slint", allow = ["LicenseRef-Slint-Royalty-free-2.0"] },
+    { crate = "slint-build", allow = ["LicenseRef-Slint-Royalty-free-2.0"] },
+    { crate = "slint-macros", allow = ["LicenseRef-Slint-Royalty-free-2.0"] },
+    { crate = "i-slint-backend-selector", allow = ["LicenseRef-Slint-Royalty-free-2.0"] },
+    { crate = "i-slint-backend-winit", allow = ["LicenseRef-Slint-Royalty-free-2.0"] },
+    { crate = "i-slint-common", allow = ["LicenseRef-Slint-Royalty-free-2.0"] },
+    { crate = "i-slint-compiler", allow = ["LicenseRef-Slint-Royalty-free-2.0"] },
+    { crate = "i-slint-core", allow = ["LicenseRef-Slint-Royalty-free-2.0"] },
+    { crate = "i-slint-core-macros", allow = ["LicenseRef-Slint-Royalty-free-2.0"] },
+    { crate = "i-slint-renderer-femtovg", allow = ["LicenseRef-Slint-Royalty-free-2.0"] },
+]
 
 [licenses.private]
 # workspace 自己的 crate（publish = false）不檢查。
@@ -47,3 +59,9 @@ unknown-git = "deny"
 [advisories]
 # 需要網路抓 RustSec 資料庫；離線時以 `cargo deny check licenses bans sources` 代替。
 yanked = "deny"
+# 只忽略「不再維護」通知，不忽略漏洞；兩者都是 Slint 1.19.0 的間接依賴、沒有可升級的版本（D-R14）。
+# Slint 升級時重新檢查，能拿掉就拿掉。
+ignore = [
+    { id = "RUSTSEC-2026-0441", reason = "pin-utils unmaintained; via spin_on <- slint-build/slint-macros (build time only)" },
+    { id = "RUSTSEC-2026-0543", reason = "chrono unmaintained; via i-slint-core, no replacement in Slint 1.19.0" },
+]

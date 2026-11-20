@@ -16,9 +16,22 @@ iat-core = { path = "crates/iat-core" }
 crc32fast = "1.5.5"
 miniz_oxide = "0.8.9"
 png = "0.18.1"
+rfd = "0.18.0"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 sha2 = "0.11.1"
+# GUI：預設 feature 換成明確清單；繪圖用 FemtoVG（WGPU，純 Rust，D-R14），winit 後端（拖放要接 winit 事件）
+slint = { version = "1.19.0", default-features = false, features = [
+    "std",
+    "compat-1-2",
+    "backend-winit",
+    "renderer-femtovg-wgpu",
+    "accessibility",
+    "unstable-winit-030",
+] }
+slint-build = "1.19.0"
+# 介面語言的預設值；Slint 已經依賴同一版
+sys-locale = "0.3.2"
 windows-sys = { version = "0.61.2", features = [
     "Win32_Foundation",
     "Win32_Globalization",
