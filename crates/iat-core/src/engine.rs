@@ -212,12 +212,19 @@ fn new_side<'a>(
     }
 }
 
+/// 這個版本有前端（掃描與解碼器）的格式。
+pub(crate) fn has_frontend(format: &str) -> bool {
+    matches!(format, "png" | "webp")
+}
+
 fn prepare_side<'a>(s: &mut Side<'a>, issues: &mut Vec<Issue>, lim: &Limits) {
     let st = &mut s.st;
     st.rep.size_bytes = Count(st.input.size());
     st.rep.format = sniff_format(st.input.head()).to_string();
     if st.rep.format == "png" {
         s.dec = crate::png_side::prepare_png(st, issues, lim);
+    } else if st.rep.format == "webp" {
+        s.dec = crate::webp_side::prepare_webp(st, issues, lim);
     } else {
         let t0 = Instant::now();
         st.rep.container_status = "unverified".into();
@@ -259,6 +266,7 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Outcome {
     let lim = &input.limits;
     let mut r = Report { mode: input.mode.as_str().into(), ..Report::default() };
     r.codecs.insert(crate::png_side::DECODER_NAME.into(), crate::png_side::DECODER_VERSION.into());
+    r.codecs.insert(crate::webp_side::DECODER_NAME.into(), crate::webp_side::DECODER_VERSION.into());
 
     let quota = Rc::new(RefCell::new(TempQuota::new(lim.temp_gib << 30, input.temp_free_bytes)));
     let mut issues: Vec<Issue> = Vec::new();

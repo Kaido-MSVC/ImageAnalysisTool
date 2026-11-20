@@ -22,6 +22,8 @@ pub mod sniff;
 pub mod temp;
 pub mod text;
 pub mod view;
+pub mod webp_scan;
+pub mod webp_side;
 pub mod win;
 
 use std::sync::Arc;

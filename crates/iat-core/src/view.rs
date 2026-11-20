@@ -107,7 +107,7 @@ pub fn decode_for_view(
         ViewStop::OverViewLimit { width, height } => ViewError::OverViewLimit { width, height },
     })?;
     if v.layout.channels == 0 {
-        return Err(if v.format == "png" {
+        return Err(if crate::engine::has_frontend(&v.format) {
             ViewError::Decode(v.error.unwrap_or_default())
         } else {
             ViewError::Unsupported(v.format)
@@ -167,6 +167,21 @@ mod tests {
         let e = decode_for_view(&fixture("png_gray16_trns.png"), None, &Limits::default(), 1, &CancelToken::new())
             .unwrap_err();
         assert!(matches!(e, ViewError::OverViewLimit { .. }), "{e:?}");
+    }
+
+    #[test]
+    fn webp_keeps_alpha_and_rgb_under_zero_alpha() {
+        let view = |n: &str| decode_for_view(&fixture(n), None, &Limits::default(), u64::MAX, &CancelToken::new());
+        let img = view("s3_webp_rgba8_icc.webp").expect("fixture decodes");
+        assert_eq!((img.model, img.bits, img.rows), ("rgba", 8, img.height));
+        let hidden = img.samples.as_chunks::<4>().0.iter().filter(|p| p[3] == 0 && p[..3] != [0, 0, 0]).count();
+        assert!(hidden > 0, "RGB under alpha 0 is kept");
+        // VP8L 提示關閉但有 alpha：仍以 RGBA 交出
+        let img = view("s3_webp_hint_off_alpha40.webp").expect("fixture decodes");
+        assert_eq!(img.model, "rgba");
+        assert!(img.samples.as_chunks::<4>().0.iter().all(|p| p[3] == 64));
+        // 提示關閉且完全不透明：RGB
+        assert_eq!(view("s3_webp_rgb8_icc.webp").expect("fixture decodes").model, "rgb");
     }
 
     #[test]
