@@ -202,6 +202,46 @@ C++ 版有些問題代碼來自 libpng 的警告：`metadata_parse_failed`（警
 
 其他不影響行為的修正：`TempError.kind` 改成 `TempErrorKind` enum（`Display` 輸出原本的字串，報告的 `temp_<kind>` 原因不變）；引擎拿掉 `decodable` 旗標，改看解碼器的 `Option`，被預算或 `open()` 擋下的解碼器移到 `stopped`，只保留做記憶體統計；報告暫存檔名取 run_id 前 8 個字元時改用 `get(..8)`；workspace 加上 `clippy::let_underscore_must_use`。
 
+### D-R14 GUI 繪圖後端改用 FemtoVG（WGPU），影像檢視用顯示縮圖金字塔（2026-11-20，階段 2）
+
+**修訂規劃書「GUI（Slint）設計要點」的繪圖後端**：規劃書寫的是 `renderer-skia`，實際改用 `renderer-femtovg-wgpu`，整個 workspace 維持 `+crt-static`，不需要建置腳本或動態 CRT。
+
+原因：
+- Skia 是 C++ 預建檔，違反規劃書目標 4（純 Rust）。
+- 而且 skia-bindings 0.157.0 沒有 `+crt-static` 的預建檔（`…-static` 下載 404），會退回從原始碼完整建置。
+- FemtoVG（WGPU）實測 16K×8K 平移順暢，只有縮放會卡。
+
+**縮放卡頓的處理**：
+- iat-gui 為顯示用的 8-bit RGBA 影像建立縮圖金字塔：第 0 層原尺寸，之後每層長寬減半，直到長邊不超過 256。
+- 縮放比例 z < 1 時取 k = floor(log2(1/z)) 那一層（2^-k ≥ z 的最小層）；100% 以上一律用原尺寸層，`pixelated` 不受影響。
+- 影像縮小用 2×2 平均；差異熱圖用 2×2 取最亮，單一個不同的像素縮小後仍看得見。
+- 像素值檢視與差異判定照舊讀原始樣本（`iat_core::DecodedImage`），金字塔只供顯示。
+
+**實測**（release，16384×8192 RGB 8-bit，視窗約 1100×800）：
+- 每一畫格改一次縮放比例（5% 到 100% 來回，6 秒）：沒有金字塔 4.5 FPS；有金字塔 37 FPS。另有一次約 0.5 秒的停頓，推測是第一次切到原尺寸層時上傳 512 MB 貼圖。
+- 縮放比例固定、全速重繪時，有沒有金字塔都在 230 FPS 左右。所以卡頓出在縮放比例改變的時候，不是靜態繪圖。沒有金字塔時縮小畫面還會有明顯的疊紋。
+- 400%（原尺寸層、pixelated）約 180 FPS。
+- 只檢查一個檔案並開啟檢視時，程序約使用 1.6 GB 記憶體。
+
+**階段 2 的其他決定**：
+- 檢視 API：`iat_core::decode_for_view(path, temp_dir, limits, max_pixels, cancel)` 回傳原始正規樣本（16-bit 完整保留），交錯 PNG 用 delete-on-close 暫存檔。
+  - 寬×高超過 `max_pixels` 時，在配置樣本緩衝前就停止。GUI 設為 2^28（16K×16K）。
+- 進度：引擎回報 `Stage::Analyze`，done／total 是兩側已解出的列數與總列數。GUI 最多每 50 ms 更新一次畫面；CLI 不使用進度，輸出不變。
+- 錯誤型別（審查第 9 點）：`LimitError`、`ReportTargetError`、`WriteReportError`（含 `CleanupFailure`）、`CreateTempError`，`Display` 文字與 C++ 版相同。GUI 依種類提示，例如匯出目標已存在時請使用者另選檔名。
+- GUI 匯出用的是和 CLI 相同的 `report_json_text`／`render_markdown`、`validate_report_targets`、`write_new_file`，請求設定也和 CLI 預設相同（`full_paths = false`、預設 limits）。實測同一組檔案的 JSON，除了 run_id、metrics 與暫存空間的剩餘量之外完全相同。
+- 拖放：照 slint-probe v4，接 winit 的 `HoveredFile`／`DroppedFile`，加 50 ms 批次計時器。
+  - 一次兩個以上：依拖入順序填入原檔與輸出（多的忽略）。
+  - 只有一個：先填原檔，原檔已有就填輸出。
+  - 執行中不換檔。命令列參數 `iat-gui <原檔> [<輸出檔>]` 也用同一個規則。
+- 多語系：
+  - `.slint` 原文為英文，用 `@tr()` 包住；`build.rs` 關閉預設的翻譯 context（`DefaultTranslationContext::None`），所以 `.po` 沒有 msgctxt。
+  - 翻譯檔在 `crates/iat-gui/lang/{zh_TW,ja}/LC_MESSAGES/iat-gui.po`，`lang/check_po.py` 檢查有沒有缺漏或多餘的條目。
+  - 啟動時依 Windows 顯示語言選擇（sys-locale；中文一律用繁中），`IAT_GUI_LANG`（`en`、`zh_TW`、`ja`）優先。介面上可以切換，但這次沒有記住選擇。
+  - 字型依語言指定：英文 Segoe UI、繁中 Microsoft JhengHei UI、日文 Yu Gothic UI，避免漢字用到另一種語言的字形。日文介面下路徑的 `\` 顯示成「¥」，這是 Yu Gothic 的既有行為。
+- 報告內容（問題訊息等）維持英文，和 CLI 相同，不跟介面語言變；Markdown 匯出也和 CLI 一樣。
+  - core 的取消訊息是 `cancelled by user (Ctrl+C / Ctrl+Break)`，GUI 按「取消」時也是這句，因為報告文字要和 CLI 及 C++ 版相同。
+- Slint 免版稅授權：關於畫面放 `AboutSlint`；deny.toml 的授權例外與 advisories 忽略見 docs/dependencies.md。
+
 ## 允許的差異
 
 比對腳本讀這張表；表格以外的差異一律算失敗。欄位為 JSON 的點路徑，或 `exit`、`stderr`、`markdown`；可用 `*` 萬用字元。
