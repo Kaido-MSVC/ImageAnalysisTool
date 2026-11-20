@@ -466,7 +466,7 @@ component ViewerPage inherits VerticalLayout {
 
     function fit() {
         if (root.current.width > 0 && root.current.height > 0) {
-            root.zoom = max(0.02, min(flick.width / (root.current.width * 1px), flick.height / (root.current.height * 1px)));
+            root.zoom = clamp(min(flick.width / (root.current.width * 1px), flick.height / (root.current.height * 1px)), 0.02, 16);
         }
     }
 

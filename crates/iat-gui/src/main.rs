@@ -339,7 +339,11 @@ fn show_view(ui: &AppWindow, key: (PathBuf, Option<PathBuf>), v: ViewLoaded) {
 }
 
 fn pick_file(title: &str) -> Option<PathBuf> {
-    rfd::FileDialog::new().set_title(title).add_filter("PNG", &["png"]).add_filter("*", &["*"]).pick_file()
+    rfd::FileDialog::new()
+        .set_title(title)
+        .add_filter("PNG, WebP, PSD, PSB", &["png", "webp", "psd", "psb"])
+        .add_filter("*", &["*"])
+        .pick_file()
 }
 
 fn select_language(ui: &AppWindow, language: usize) {
