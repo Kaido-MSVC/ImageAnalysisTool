@@ -1,0 +1,580 @@
+// iat GUI。字串原文為英文，以 @tr() 包住；翻譯在 lang/<語系>/LC_MESSAGES/iat-gui.po（不使用預設翻譯 context）。
+import { Button, ComboBox, ProgressIndicator, ListView, Slider, AboutSlint, Palette, VerticalBox, HorizontalBox, ScrollView } from "std-widgets.slint";
+
+export struct IssueRow {
+    severity: string,
+    code: string,
+    scope: string,
+    message: string,
+}
+
+// 結果摘要；狀態字串是報告裡的原值（英文代碼，與 JSON 相同）。
+export struct ResultInfo {
+    compare: bool,
+    exit-code: int,
+    exit-reason: string,
+    strict: string,
+    strict-reasons: string,
+    samples: string,
+    color: string,
+    metadata: string,
+    original-name: string,
+    original-detail: string,
+    output-name: string,
+    output-detail: string,
+    run-id: string,
+}
+
+global Tone {
+    out property <bool> dark: Palette.color-scheme == ColorScheme.dark;
+    out property <color> good: dark ? #6ccb8a : #1b7a3d;
+    out property <color> bad: dark ? #ff8a80 : #b3261e;
+    out property <color> warn: dark ? #f0c05a : #8a5a00;
+    out property <color> muted: dark ? #a8a8a8 : #5f5f5f;
+}
+
+component SectionTitle inherits Text {
+    font-size: 15px;
+    font-weight: 600;
+}
+
+component Secondary inherits Text {
+    color: Tone.muted;
+    font-size: 12px;
+}
+
+// 一個輸入檔的拖放區。檔案從視窗任何位置拖入，依規則填入（見 Rust 端）；這裡只顯示狀態。
+component FileSlot inherits Rectangle {
+    in property <string> role;
+    in property <string> hint;
+    in property <string> name;
+    in property <string> path;
+    in property <bool> highlight;
+    in property <bool> enabled: true;
+    callback open();
+    callback clear();
+
+    min-height: 150px;
+    border-radius: 8px;
+    border-width: root.highlight ? 2px : 1px;
+    border-color: root.highlight ? Palette.accent-background : Palette.border;
+    background: Palette.alternate-background;
+
+    VerticalLayout {
+        padding: 16px;
+        spacing: 6px;
+        SectionTitle { text: root.role; }
+        Secondary { text: root.hint; wrap: word-wrap; }
+        Rectangle { height: 4px; }
+        if root.name == "": Text {
+            text: @tr("Drop a file anywhere on the window, or choose one.");
+            color: Tone.muted;
+            wrap: word-wrap;
+            vertical-stretch: 1;
+        }
+        if root.name != "": VerticalLayout {
+            vertical-stretch: 1;
+            spacing: 2px;
+            Text { text: root.name; font-size: 14px; font-weight: 600; overflow: elide; }
+            Secondary { text: root.path; overflow: elide; }
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: start;
+            Button { text: @tr("Choose…"); enabled: root.enabled; clicked => { root.open(); } }
+            Button { text: @tr("Clear"); enabled: root.enabled && root.name != ""; clicked => { root.clear(); } }
+        }
+    }
+}
+
+component NavButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> selected;
+    in property <bool> enabled: true;
+    callback clicked();
+    accessible-role: tab;
+    accessible-label: root.text;
+    accessible-item-selected: root.selected;
+    accessible-enabled: root.enabled;
+    accessible-action-default => { if (root.enabled) { root.clicked(); } }
+    height: 32px;
+    min-width: label.preferred-width + 24px;
+    border-radius: 6px;
+    background: root.selected ? Palette.accent-background : (ta.has-hover && root.enabled ? Palette.alternate-background : transparent);
+    label := Text {
+        text: root.text;
+        color: root.selected ? Palette.accent-foreground : (root.enabled ? Palette.foreground : Tone.muted);
+        font-weight: root.selected ? 600 : 400;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    ta := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => { root.clicked(); }
+    }
+}
+
+component SelectPage inherits VerticalLayout {
+    in property <string> original-name;
+    in property <string> original-path;
+    in property <string> output-name;
+    in property <string> output-path;
+    in property <bool> os-drag;
+    callback open-original();
+    callback open-output();
+    callback clear-original();
+    callback clear-output();
+    callback swap();
+    callback start();
+
+    padding: 20px;
+    spacing: 14px;
+    Text {
+        text: @tr("Choose the original and the converted file. With only the original, the file is inspected on its own.");
+        wrap: word-wrap;
+    }
+    HorizontalLayout {
+        spacing: 12px;
+        vertical-stretch: 0;
+        FileSlot {
+            horizontal-stretch: 1;
+            role: @tr("Original");
+            hint: @tr("The reference file.");
+            name: root.original-name;
+            path: root.original-path;
+            highlight: root.os-drag && root.original-name == "";
+            open => { root.open-original(); }
+            clear => { root.clear-original(); }
+        }
+        VerticalLayout {
+            alignment: center;
+            Button {
+                text: @tr("Swap");
+                enabled: root.original-name != "" || root.output-name != "";
+                clicked => { root.swap(); }
+            }
+        }
+        FileSlot {
+            horizontal-stretch: 1;
+            role: @tr("Output");
+            hint: @tr("The converted file to check against the original (optional).");
+            name: root.output-name;
+            path: root.output-path;
+            highlight: root.os-drag && root.original-name != "";
+            open => { root.open-output(); }
+            clear => { root.clear-output(); }
+        }
+    }
+    Secondary {
+        text: @tr("Dropping two files fills Original and Output in drop order. A single file fills Original first, then Output.");
+        wrap: word-wrap;
+    }
+    Rectangle { vertical-stretch: 1; }
+    HorizontalLayout {
+        alignment: end;
+        Button {
+            text: root.output-name != "" ? @tr("Compare") : @tr("Inspect");
+            primary: true;
+            enabled: root.original-name != "";
+            clicked => { root.start(); }
+        }
+    }
+}
+
+component RunPage inherits VerticalLayout {
+    in property <int> stage;
+    in property <float> progress;
+    in property <bool> cancelling;
+    callback cancel();
+
+    padding: 40px;
+    spacing: 14px;
+    alignment: center;
+    SectionTitle {
+        text: root.stage == 0 ? @tr("Reading and hashing the inputs…") : @tr("Decoding and comparing…");
+    }
+    ProgressIndicator { progress: root.progress; height: 6px; }
+    Secondary { text: @tr("{}%", round(root.progress * 100)); }
+    HorizontalLayout {
+        alignment: start;
+        Button {
+            text: root.cancelling ? @tr("Cancelling…") : @tr("Cancel");
+            enabled: !root.cancelling;
+            clicked => { root.cancel(); }
+        }
+    }
+}
+
+component Verdict inherits VerticalLayout {
+    in property <ResultInfo> info;
+    property <color> tone: info.exit-code == 0 ? Tone.good : info.exit-code == 1 || info.exit-code == 3 || info.exit-code == 5 ? Tone.bad : Tone.warn;
+    spacing: 4px;
+    Text {
+        font-size: 22px;
+        font-weight: 700;
+        color: root.tone;
+        text: info.exit-code == 0 ? (info.compare ? @tr("Strict match") : @tr("File is clean"))
+            : info.exit-code == 1 ? @tr("Strict mismatch")
+            : info.exit-code == 2 ? @tr("Indeterminate")
+            : info.exit-code == 3 ? @tr("Decode or structure failure")
+            : info.exit-code == 4 ? @tr("Not checked")
+            : @tr("Run error");
+    }
+    Text {
+        wrap: word-wrap;
+        text: info.exit-code == 0 ? (info.compare ? @tr("Samples, colour and metadata agree.") : @tr("The file decoded completely; container and metadata are valid."))
+            : info.exit-code == 1 ? @tr("The files differ. See the reasons and issues below.")
+            : info.exit-code == 2 ? @tr("The tool could not prove a match or a mismatch.")
+            : info.exit-code == 3 ? @tr("At least one file is damaged or failed to decode.")
+            : info.exit-code == 4 ? @tr("Stopped by a resource limit, the deadline or cancellation.")
+            : @tr("An input could not be read, or the environment failed.");
+    }
+    Secondary { text: @tr("Exit code {} ({}) · strict: {}", info.exit-code, info.exit-reason, info.strict); }
+}
+
+component KeyValue inherits HorizontalLayout {
+    in property <string> key;
+    in property <string> value;
+    spacing: 12px;
+    Secondary { text: root.key; width: 110px; vertical-alignment: top; font-size: 13px; }
+    Text { text: root.value == "" ? "—" : root.value; wrap: word-wrap; horizontal-stretch: 1; }
+}
+
+component ResultsPage inherits VerticalLayout {
+    in property <ResultInfo> info;
+    in property <[IssueRow]> issues;
+    in property <int> export-status;
+    in property <string> export-detail;
+    callback export-json();
+    callback export-md();
+    callback view-images();
+    callback new-run();
+
+    padding: 20px;
+    spacing: 12px;
+    Verdict { info: root.info; }
+    VerticalLayout {
+        spacing: 4px;
+        KeyValue { key: @tr("Original"); value: info.original-name + "  " + info.original-detail; }
+        if info.compare: KeyValue { key: @tr("Output"); value: info.output-name + "  " + info.output-detail; }
+        if info.compare: KeyValue { key: @tr("Samples"); value: info.samples; }
+        if info.compare: KeyValue { key: @tr("Colour"); value: info.color; }
+        if info.compare: KeyValue { key: @tr("Metadata"); value: info.metadata; }
+        if info.strict-reasons != "": KeyValue { key: @tr("Reasons"); value: info.strict-reasons; }
+    }
+    SectionTitle { text: @tr("Issues ({})", root.issues.length); }
+    Rectangle {
+        vertical-stretch: 1;
+        border-width: 1px;
+        border-color: Palette.border;
+        border-radius: 6px;
+        if root.issues.length == 0: Secondary {
+            text: @tr("No issues were reported.");
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        ListView {
+            for row in root.issues: HorizontalLayout {
+                padding-left: 10px;
+                padding-right: 10px;
+                padding-top: 6px;
+                padding-bottom: 6px;
+                spacing: 10px;
+                Text {
+                    width: 64px;
+                    font-weight: 600;
+                    color: row.severity == "error" ? Tone.bad : row.severity == "warning" ? Tone.warn : Tone.muted;
+                    text: row.severity == "error" ? @tr("Error") : row.severity == "warning" ? @tr("Warning") : @tr("Info");
+                }
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 2px;
+                    Secondary { text: row.code + " · " + row.scope; }
+                    Text { text: row.message; wrap: word-wrap; }
+                }
+            }
+        }
+    }
+    if root.export-status != 0: Text {
+        wrap: word-wrap;
+        color: root.export-status == 1 ? Tone.good : Tone.bad;
+        text: root.export-status == 1 ? @tr("Report saved: {}", root.export-detail)
+            : root.export-status == 2 ? @tr("A file with this name already exists and is never overwritten. Choose a different file name: {}", root.export-detail)
+            : root.export-status == 3 ? @tr("The report cannot replace one of the input files. Choose a different file name: {}", root.export-detail)
+            : root.export-status == 4 ? @tr("The folder does not exist: {}", root.export-detail)
+            : @tr("The report could not be saved: {}", root.export-detail);
+    }
+    HorizontalLayout {
+        spacing: 8px;
+        Button { text: @tr("Export JSON…"); clicked => { root.export-json(); } }
+        Button { text: @tr("Export Markdown…"); clicked => { root.export-md(); } }
+        Rectangle { horizontal-stretch: 1; }
+        Button { text: @tr("View images"); clicked => { root.view-images(); } }
+        Button { text: @tr("New comparison"); primary: true; clicked => { root.new-run(); } }
+    }
+}
+
+component ViewerPage inherits VerticalLayout {
+    // 0 未載入、1 載入中、2 可檢視、3 錯誤
+    in property <int> state;
+    in property <string> error-text;
+    in property <bool> has-output;
+    // 0 可用、1 尺寸不同、2 只有一個檔案
+    in property <int> diff-state;
+    // 顯示用金字塔：第 0 層原尺寸，之後每層減半
+    in property <[image]> img-original;
+    in property <[image]> img-output;
+    in property <[image]> img-diff;
+    in property <string> probe-text;
+    in property <string> info-text;
+    in-out property <int> mode;
+    in-out property <float> zoom: 1;
+    // 每次載入新影像時加一：檢視會自動符合視窗
+    in property <int> fit-token;
+    callback probe(int, int);
+    changed fit-token => { root.fit(); }
+
+    property <[image]> levels: root.mode == 0 ? root.img-original : root.mode == 1 ? root.img-output : root.img-diff;
+    // 原尺寸層決定座標與大小；畫面上只換來源，100% 以上一律用原尺寸層
+    property <image> current: root.levels[0];
+    property <int> level: min(root.levels.length - 1, root.level-for(root.zoom));
+    property <image> shown: root.levels[max(0, root.level)];
+
+    // 縮放比例 z < 1 時取 2^-k ≥ z 的最小層，也就是 k = floor(log2(1/z))
+    pure function level-for(z: float) -> int {
+        if (z >= 1) { return 0; }
+        let k = floor(log(1 / z, 2));
+        return max(0, k);
+    }
+    property <int> hover-x: ta.has-hover ? floor(ta.mouse-x / (root.zoom * 1px)) : -1;
+    property <int> hover-y: ta.has-hover ? floor(ta.mouse-y / (root.zoom * 1px)) : -1;
+    changed hover-x => { root.probe(root.hover-x, root.hover-y); }
+    changed hover-y => { root.probe(root.hover-x, root.hover-y); }
+
+    function fit() {
+        if (root.current.width > 0 && root.current.height > 0) {
+            root.zoom = max(0.02, min(flick.width / (root.current.width * 1px), flick.height / (root.current.height * 1px)));
+        }
+    }
+
+    padding: 12px;
+    spacing: 8px;
+    HorizontalLayout {
+        spacing: 6px;
+        NavButton { text: @tr("Original"); selected: root.mode == 0; clicked => { root.mode = 0; } }
+        NavButton { text: @tr("Output"); selected: root.mode == 1; enabled: root.has-output; clicked => { root.mode = 1; } }
+        NavButton { text: @tr("Difference"); selected: root.mode == 2; enabled: root.diff-state == 0; clicked => { root.mode = 2; } }
+        Rectangle { width: 12px; }
+        Button { text: @tr("Fit"); clicked => { root.fit(); } }
+        Button { text: "100%"; clicked => { root.zoom = 1; } }
+        Slider { minimum: 0.02; maximum: 16; value <=> root.zoom; min-width: 160px; }
+        Text { text: round(root.zoom * 100) + "%"; vertical-alignment: center; min-width: 48px; }
+        Rectangle { horizontal-stretch: 1; }
+        Secondary { text: @tr("ICC not applied"); vertical-alignment: center; }
+    }
+    Rectangle {
+        vertical-stretch: 1;
+        background: Tone.dark ? #1b1b1b : #e6e6e6;
+        border-radius: 6px;
+        clip: true;
+        flick := Flickable {
+            content-width: max(self.width, root.current.width * 1px * root.zoom);
+            content-height: max(self.height, root.current.height * 1px * root.zoom);
+            Image {
+                x: 0;
+                y: 0;
+                source: root.shown;
+                width: root.current.width * 1px * root.zoom;
+                height: root.current.height * 1px * root.zoom;
+                image-rendering: root.zoom >= 2 ? pixelated : smooth;
+                ta := TouchArea {
+                    scroll-event(e) => {
+                        if (e.modifiers.control) {
+                            root.zoom = clamp(root.zoom * (e.delta-y > 0 ? 1.25 : 0.8), 0.02, 16);
+                            return accept;
+                        }
+                        return reject;
+                    }
+                }
+            }
+        }
+        if root.state != 2: Rectangle {
+            background: Tone.dark ? #1b1b1b : #e6e6e6;
+            Text {
+                text: root.state == 1 ? @tr("Decoding the images for viewing…") : root.state == 3 ? @tr("The images cannot be shown: {}", root.error-text) : "";
+                color: root.state == 3 ? Tone.bad : Tone.muted;
+                wrap: word-wrap;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+    }
+    if root.mode == 2: Secondary {
+        text: @tr("Difference: black means equal; red to yellow to white shows the largest channel difference (log scale).");
+        wrap: word-wrap;
+    }
+    if root.diff-state == 1: Secondary { text: @tr("The images have different dimensions, so no difference map is shown."); }
+    if root.diff-state == 3: Secondary { text: @tr("The images use different sample models or bit depths, so no difference map is shown."); }
+    HorizontalLayout {
+        spacing: 16px;
+        Text { text: root.probe-text; font-family: "Consolas"; horizontal-stretch: 1; overflow: elide; }
+        Secondary { text: root.info-text; }
+    }
+}
+
+component AboutPage inherits VerticalLayout {
+    in property <string> version;
+    padding: 24px;
+    spacing: 10px;
+    Text { text: "iat " + root.version; font-size: 22px; font-weight: 700; }
+    Text {
+        text: @tr("Image Analysis Tool checks whether a converted image keeps every sample, colour signal and piece of metadata of the original.");
+        wrap: word-wrap;
+    }
+    Secondary { text: @tr("Licensed under the MIT License. Reports are never overwritten; input files are opened read-only."); wrap: word-wrap; }
+    Rectangle { height: 8px; }
+    HorizontalLayout {
+        alignment: start;
+        AboutSlint { }
+    }
+    Rectangle { vertical-stretch: 1; }
+}
+
+export component AppWindow inherits Window {
+    title: "iat";
+    preferred-width: 1100px;
+    preferred-height: 760px;
+    min-width: 820px;
+    min-height: 560px;
+
+    // 0 English、1 繁體中文、2 日本語
+    in-out property <int> language;
+    default-font-family: root.language == 1 ? "Microsoft JhengHei UI" : root.language == 2 ? "Yu Gothic UI" : "Segoe UI";
+
+    in property <string> version;
+    // 0 選檔、1 執行中、2 結果、3 影像、4 關於
+    in-out property <int> page;
+    in property <bool> os-drag;
+    in property <string> original-name;
+    in property <string> original-path;
+    in property <string> output-name;
+    in property <string> output-path;
+
+    in property <int> stage;
+    in property <float> progress;
+    in property <bool> cancelling;
+
+    in property <bool> has-result;
+    in property <ResultInfo> result;
+    in property <[IssueRow]> issues;
+    in property <int> export-status;
+    in property <string> export-detail;
+
+    in property <int> view-state;
+    in property <string> view-error;
+    in property <bool> view-has-output;
+    in property <int> view-diff-state;
+    in property <[image]> img-original;
+    in property <[image]> img-output;
+    in property <[image]> img-diff;
+    in property <string> probe-text;
+    in property <string> view-info;
+    in-out property <int> view-mode;
+    in-out property <float> view-zoom: 1;
+    in property <int> view-fit-token;
+
+    callback language-selected(int);
+    callback open-original();
+    callback open-output();
+    callback clear-original();
+    callback clear-output();
+    callback swap();
+    callback start();
+    callback cancel();
+    callback export-json();
+    callback export-md();
+    callback enter-viewer();
+    callback probe(int, int);
+
+    VerticalLayout {
+        Rectangle {
+            background: Palette.alternate-background;
+            HorizontalLayout {
+                padding: 8px;
+                padding-left: 14px;
+                spacing: 4px;
+                Text { text: "iat"; font-size: 16px; font-weight: 700; vertical-alignment: center; }
+                Rectangle { width: 14px; }
+                NavButton { text: @tr("Files"); selected: root.page == 0; enabled: root.page != 1; clicked => { root.page = 0; } }
+                NavButton { text: @tr("Results"); selected: root.page == 2; enabled: root.page != 1 && root.has-result; clicked => { root.page = 2; } }
+                NavButton {
+                    text: @tr("Images");
+                    selected: root.page == 3;
+                    enabled: root.page != 1 && root.has-result;
+                    clicked => { root.page = 3; root.enter-viewer(); }
+                }
+                NavButton { text: @tr("About"); selected: root.page == 4; enabled: root.page != 1; clicked => { root.page = 4; } }
+                Rectangle { horizontal-stretch: 1; }
+                ComboBox {
+                    width: 150px;
+                    model: ["English", "繁體中文", "日本語"];
+                    current-index: root.language;
+                    selected => { root.language = self.current-index; root.language-selected(self.current-index); }
+                }
+            }
+        }
+        if root.page == 0: SelectPage {
+            vertical-stretch: 1;
+            original-name: root.original-name;
+            original-path: root.original-path;
+            output-name: root.output-name;
+            output-path: root.output-path;
+            os-drag: root.os-drag;
+            open-original => { root.open-original(); }
+            open-output => { root.open-output(); }
+            clear-original => { root.clear-original(); }
+            clear-output => { root.clear-output(); }
+            swap => { root.swap(); }
+            start => { root.start(); }
+        }
+        if root.page == 1: RunPage {
+            vertical-stretch: 1;
+            stage: root.stage;
+            progress: root.progress;
+            cancelling: root.cancelling;
+            cancel => { root.cancel(); }
+        }
+        if root.page == 2: ResultsPage {
+            vertical-stretch: 1;
+            info: root.result;
+            issues: root.issues;
+            export-status: root.export-status;
+            export-detail: root.export-detail;
+            export-json => { root.export-json(); }
+            export-md => { root.export-md(); }
+            view-images => { root.page = 3; root.enter-viewer(); }
+            new-run => { root.page = 0; }
+        }
+        if root.page == 3: ViewerPage {
+            vertical-stretch: 1;
+            state: root.view-state;
+            error-text: root.view-error;
+            has-output: root.view-has-output;
+            diff-state: root.view-diff-state;
+            img-original: root.img-original;
+            img-output: root.img-output;
+            img-diff: root.img-diff;
+            probe-text: root.probe-text;
+            info-text: root.view-info;
+            mode <=> root.view-mode;
+            fit-token: root.view-fit-token;
+            zoom <=> root.view-zoom;
+            probe(x, y) => { root.probe(x, y); }
+        }
+        if root.page == 4: AboutPage {
+            vertical-stretch: 1;
+            version: root.version;
+        }
+    }
+}
