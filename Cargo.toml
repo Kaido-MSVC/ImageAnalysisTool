@@ -31,6 +31,10 @@ windows-sys = { version = "0.61.2", features = [
 [workspace.lints.rust]
 unsafe_code = "deny"
 
+[workspace.lints.clippy]
+# `let _ = 會失敗的呼叫` 會默默丟掉錯誤；要丟就明說理由。
+let_underscore_must_use = "warn"
+
 [profile.release]
 lto = true
 codegen-units = 1

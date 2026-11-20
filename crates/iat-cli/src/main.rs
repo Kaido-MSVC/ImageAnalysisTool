@@ -2,7 +2,7 @@
 //! 參數、訊息與退出碼對照 C++ 版 `src/iat_main.cpp`。
 
 use std::ffi::OsString;
-use std::io::Write;
+use std::io::{self, Write};
 use std::path::PathBuf;
 
 use iat_core::markdown::render_markdown;
@@ -129,16 +129,28 @@ fn err(s: &str) {
     eprintln!("{s}");
 }
 
-fn write_stdout(s: &str) {
-    let mut out = std::io::stdout().lock();
-    let _ = out.write_all(s.as_bytes());
-    let _ = out.flush();
+fn write_stdout(s: &str) -> io::Result<()> {
+    let mut out = io::stdout().lock();
+    out.write_all(s.as_bytes())?;
+    out.flush()
+}
+
+/// stdout 寫入失敗時要回報的訊息；讀取端提早關閉（BrokenPipe）照 C++ 版放過，回傳 None。
+fn stdout_failure(res: io::Result<()>) -> Option<String> {
+    match res {
+        Ok(()) => None,
+        Err(e) if e.kind() == io::ErrorKind::BrokenPipe => None,
+        Err(e) => Some(format!("stdout write failed: {}", iat_core::win::error_text(iat_core::win::os_code(&e)))),
+    }
 }
 
 fn run() -> i32 {
     let argv: Vec<OsString> = std::env::args_os().collect();
     if argv.len() == 2 && argv[1] == "--version" {
-        write_stdout(&format!("iat {}\n", iat_core::VERSION));
+        if let Some(m) = stdout_failure(write_stdout(&format!("iat {}\n", iat_core::VERSION))) {
+            err(&format!("iat: {m}"));
+            return 5;
+        }
         return 0;
     }
     let a = match parse_args(&argv) {
@@ -171,26 +183,41 @@ fn run() -> i32 {
     if let Some(p) = &a.report_md {
         emit(p, &md_text);
     }
-    match a.stdout {
-        Some(StdoutFormat::Json) => write_stdout(&json_text),
-        Some(StdoutFormat::Md) => write_stdout(&md_text),
-        None => {}
-    }
+    let stdout_err = match a.stdout {
+        Some(StdoutFormat::Json) => stdout_failure(write_stdout(&json_text)),
+        Some(StdoutFormat::Md) => stdout_failure(write_stdout(&md_text)),
+        None => None,
+    };
 
     err(&format!("iat: strict={} exit={} ({}) run_id={}", r.strict.result, r.exit.code, r.exit.reason, r.run_id));
     for p in &written {
         err(&format!("iat: report written: {p}"));
     }
-    // 任一份報告寫入失敗時程序退出碼為 5，優先於報告內的 exit.code。
-    if !failed.is_empty() {
-        for p in &failed {
-            err(&format!("iat: report NOT written: {p}"));
-        }
-        return 5;
+    for p in &failed {
+        err(&format!("iat: report NOT written: {p}"));
     }
-    r.exit.code
+    if let Some(m) = &stdout_err {
+        err(&format!("iat: {m}"));
+    }
+    // 任一份報告或 stdout 寫入失敗時程序退出碼為 5，優先於報告內的 exit.code。
+    if !failed.is_empty() || stdout_err.is_some() { 5 } else { r.exit.code }
 }
 
 fn main() {
     std::process::exit(run());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stdout_failure_classification() {
+        assert_eq!(stdout_failure(Ok(())), None);
+        // ERROR_NO_DATA (232)：管線讀取端已關閉，與 C++ 版一樣不算失敗
+        assert_eq!(stdout_failure(Err(io::Error::from_raw_os_error(232))), None);
+        assert_eq!(stdout_failure(Err(io::Error::from_raw_os_error(109))), None);
+        let m = stdout_failure(Err(io::Error::from_raw_os_error(112))).unwrap();
+        assert!(m.starts_with("stdout write failed: 112: "), "{m}");
+    }
 }
