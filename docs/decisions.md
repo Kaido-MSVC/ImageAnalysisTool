@@ -185,6 +185,23 @@ C++ 版有些問題代碼來自 libpng 的警告：`metadata_parse_failed`（警
 
 問題訊息的字首是 `libpng-compatible check: `（C++ 版是 `libpng: `），後面的文字相同。這些警告不寫進 `decoder_warnings`，因為它們不是解碼器產生的；兩者都列在允許差異。
 
+### D-R13 錯誤處理：不把 I/O 錯誤當成預設值（2026-11-20，錯誤處理審查）
+
+錯誤處理審查列出幾處吞掉錯誤的地方。修正前逐一對照了 C++ 版 1.0.0 在同樣情況下的行為；下列各點 C++ 版同樣吞掉錯誤，所以 Rust 版的修正是**刻意的差異**。C++ 版不動。正常情況下輸出不變，比對腳本原本一致的案例仍然全部一致。
+
+| 情況 | C++ 版（位置） | Rust 版 |
+|---|---|---|
+| 讀檔頭失敗 | `src/engine/analyze.cpp` `sniff_format`：`read_at(...).value_or(0)`，格式變成 unknown，退出碼 2 | `Input::new` 在開檔階段讀檔頭，失敗記為 `input_open_failed`（`cannot read input: …`），退出碼 5 |
+| 取檔案大小失敗 | `src/core/run.cpp` `describe`：`h->size().value_or(0)`；`analyze.cpp` 第 190、195 行同樣 | `Input::new` 取大小，失敗同上 |
+| 雜湊時讀取失敗 | `src/common/win_util.cpp` `sha256_file` 讀取失敗與取消都回傳 `nullopt`；`run.cpp` `value_or("")` 後照樣往下跑 | 分成完成、取消、讀取失敗三種；讀取失敗記為 `input_open_failed`（`cannot read input while hashing: …`），退出碼 5；取消照舊 |
+| stdout 寫入失敗 | `src/iat_main.cpp` `write_stdout`：`WriteFile` 失敗就直接 return，退出碼不變 | stderr 印 `iat: stdout write failed: …`，退出碼 5（與報告寫入失敗相同）。讀取端提早關閉（`BrokenPipe`：ERROR_BROKEN_PIPE、ERROR_NO_DATA）照 C++ 版放過 |
+| 系統亂數失敗 | `win_util.cpp` `new_run_id`：不檢查 `BCryptGenRandom` 的回傳值，失敗時 run_id 由未初始化的緩衝產生 | 檢查 NTSTATUS；失敗時 run_id 留空、記為 `environment_error`（退出碼 5），不建立暫存檔也不分析，絕不用固定值 |
+| 報告暫存檔刪除失敗 | `src/core/report_io.cpp` `write_new_file`：`DeleteFileW` 不檢查 | 把「temporary file not removed: <路徑> (<錯誤>)」附加到原本的錯誤訊息 |
+
+退出碼與問題代碼依 C++ 版的對應：讀不到輸入一律歸到開檔失敗（`input_open_failed`，退出碼 5），因為 C++ 版在這一層只有這個輸入錯誤代碼；`decode_status` 記為 `not_checked`／`input_open_failed`。
+
+其他不影響行為的修正：`TempError.kind` 改成 `TempErrorKind` enum（`Display` 輸出原本的字串，報告的 `temp_<kind>` 原因不變）；引擎拿掉 `decodable` 旗標，改看解碼器的 `Option`，被預算或 `open()` 擋下的解碼器移到 `stopped`，只保留做記憶體統計；報告暫存檔名取 run_id 前 8 個字元時改用 `get(..8)`；workspace 加上 `clippy::let_underscore_must_use`。
+
 ## 允許的差異
 
 比對腳本讀這張表；表格以外的差異一律算失敗。欄位為 JSON 的點路徑，或 `exit`、`stderr`、`markdown`；可用 `*` 萬用字元。
