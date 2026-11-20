@@ -45,7 +45,7 @@ pub struct RunRequest {
 }
 
 /// 唯讀開檔，只允許別人讀（期間沒有人能寫入或取代）。目錄視為錯誤。
-fn open_read_only(p: &Path) -> Result<File, u32> {
+pub(crate) fn open_read_only(p: &Path) -> Result<File, u32> {
     let f = OpenOptions::new()
         .read(true)
         .share_mode(FILE_SHARE_READ)
@@ -87,7 +87,7 @@ fn sha256_file(input: &Input<'_>, cancel: &CancelToken, progress: &dyn Progress)
 }
 
 /// UUID 第 4 版，8-4-4-4-12 小寫十六進位；系統亂數失敗時回傳 NTSTATUS。
-fn new_run_id() -> Result<String, i32> {
+pub(crate) fn new_run_id() -> Result<String, i32> {
     let mut b = win::random_16()?;
     b[6] = (b[6] & 0x0F) | 0x40;
     b[8] = (b[8] & 0x3F) | 0x80;
@@ -304,6 +304,7 @@ pub fn run_analysis(req: &RunRequest, cancel: &CancelToken, progress: &dyn Progr
             temp: [files.files[0].as_ref(), files.files[1].as_ref()],
             temp_free_bytes: temp.free_bytes,
             cancel,
+            progress,
             deadline: t_engine + Duration::from_secs(req.limits.deadline_s),
         };
         let outcome = analyze(&input);

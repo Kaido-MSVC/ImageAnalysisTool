@@ -17,7 +17,7 @@ use crate::report::{
 use crate::sniff::sniff_format;
 use crate::temp::{TempError, TempErrorKind, TempFile, TempQuota};
 use crate::text::short_hash;
-use crate::{CancelToken, Mode, ms_since};
+use crate::{CancelToken, Mode, Progress, Stage, ms_since};
 
 /// 未知格式訊息中列出的支援格式。沿用 C++ 版 1.0.0 的文字（最終目標的支援範圍），見 D-R05。
 const SUPPORTED_FORMATS: &str = "PNG, TIFF/BigTIFF, WebP, JPEG XL, PSD/PSB, AVIF";
@@ -35,6 +35,8 @@ pub struct AnalysisInput<'a> {
     pub temp: [Option<&'a File>; 2],
     pub temp_free_bytes: u64,
     pub cancel: &'a CancelToken,
+    /// 解碼進度（Stage::Analyze，done／total 為已解出的列數與兩側總列數）
+    pub progress: &'a dyn Progress,
     /// 整次執行的期限（deadline_s）
     pub deadline: Instant,
 }
@@ -430,6 +432,10 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Outcome {
         }
     };
     let t_dec = Instant::now();
+    let total_rows: u64 =
+        std::iter::once(&a).chain(b.as_ref()).filter(|s| s.dec.is_some()).map(|s| u64::from(s.st.height)).sum();
+    let rows_done = |a: &Side<'_>, b: Option<&Side<'_>>| a.st.rows + b.map_or(0, |b| b.st.rows);
+    input.progress.report(Stage::Analyze, 0, total_rows);
     let mut stats = Stats::default();
     let mut names: &[&str] = &[];
     let (mut a_alpha, mut b_alpha): (Option<usize>, Option<usize>) = (None, None);
@@ -459,6 +465,7 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Outcome {
             if !ra || !rb {
                 break;
             }
+            input.progress.report(Stage::Analyze, a.st.rows + b.st.rows, total_rows);
             if same_layout && a.st.canon == b.st.canon {
                 stats.pixels += w as u64;
                 continue;
@@ -496,6 +503,8 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Outcome {
         }
     }
     // 沒有比較（或中途停下）的一側仍然解到最後，才知道它本身是否完整。
+    let base = rows_done(&a, b.as_ref());
+    let mut done_tail = 0u64;
     for s in std::iter::once(&mut a).chain(b.as_mut()) {
         let Some(dec) = s.dec.as_mut() else { continue };
         while !s.st.failed && s.st.rows < s.st.height as u64 {
@@ -505,6 +514,8 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Outcome {
             if !dec.read_row(&mut s.st, &mut issues) {
                 break;
             }
+            done_tail += 1;
+            input.progress.report(Stage::Analyze, base + done_tail, total_rows);
         }
     }
     for s in std::iter::once(&mut a).chain(b.as_mut()) {
@@ -886,6 +897,82 @@ fn strict_compare(r: &mut Report, not_cmp_reason: &str) {
     }
     r.strict.result = result.into();
     r.strict.reasons = reasons;
+}
+
+/// 檢視用的一側解碼結果（樣本依影像順序，未做任何轉換）。
+pub(crate) struct ViewSamples {
+    pub layout: RowLayout,
+    pub width: u32,
+    pub height: u32,
+    /// 成功解出的列數；小於 height 時表示檔案在中途失敗
+    pub rows: u32,
+    pub samples: Vec<u16>,
+    pub format: String,
+    /// 第一個錯誤問題的訊息（解碼失敗或不支援時）
+    pub error: Option<String>,
+}
+
+/// 檢視解碼的停止原因。
+pub(crate) enum ViewStop {
+    Cancelled,
+    /// 樣本緩衝無法配置（bytes）
+    TooLarge(u64),
+}
+
+/// 把一個輸入整張解碼成正規樣本，供 GUI 檢視；格式不支援或中途失敗時仍回傳已解出的部分與錯誤訊息。
+pub(crate) fn decode_view_samples(
+    input: &Input<'_>,
+    temp: Option<&File>,
+    temp_free_bytes: u64,
+    lim: &Limits,
+    cancel: &CancelToken,
+) -> Result<ViewSamples, ViewStop> {
+    let quota = Rc::new(RefCell::new(TempQuota::new(lim.temp_gib << 30, temp_free_bytes)));
+    let mut issues = Vec::new();
+    let mut s = new_side("original", input, temp, &quota);
+    prepare_side(&mut s, &mut issues, lim);
+    let mut out = ViewSamples {
+        layout: RowLayout::default(),
+        width: 0,
+        height: 0,
+        rows: 0,
+        samples: Vec::new(),
+        format: s.st.rep.format.clone(),
+        error: None,
+    };
+    let first_error = |issues: &[Issue]| issues.iter().find(|i| i.severity == "error").map(|i| i.message.clone());
+    let Some(dec) = s.dec.as_mut() else {
+        out.error = first_error(&issues);
+        return Ok(out);
+    };
+    if !dec.open(&mut s.st, &mut issues, lim) {
+        out.error = first_error(&issues).or_else(|| Some("decoder could not start".into()));
+        return Ok(out);
+    }
+    let row_len = s.st.width as usize * s.st.layout.channels as usize;
+    let total = (row_len as u64).saturating_mul(u64::from(s.st.height));
+    let bytes = total.saturating_mul(2);
+    let total = usize::try_from(total).map_err(|_| ViewStop::TooLarge(bytes))?;
+    out.samples.try_reserve_exact(total).map_err(|_| ViewStop::TooLarge(bytes))?;
+    s.st.canon = vec![0; row_len];
+    while !s.st.failed && s.st.rows < u64::from(s.st.height) {
+        if cancel.is_cancelled() {
+            return Err(ViewStop::Cancelled);
+        }
+        if !dec.read_row(&mut s.st, &mut issues) {
+            break;
+        }
+        out.samples.extend_from_slice(&s.st.canon);
+    }
+    dec.finish(&mut s.st, &mut issues);
+    out.layout = s.st.layout.clone();
+    out.width = s.st.width;
+    out.height = s.st.height;
+    out.rows = (out.samples.len() / row_len.max(1)) as u32;
+    if out.rows < out.height || s.st.failed {
+        out.error = first_error(&issues).or_else(|| Some("decoding stopped early".into()));
+    }
+    Ok(out)
 }
 
 #[cfg(test)]

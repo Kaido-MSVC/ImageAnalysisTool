@@ -21,6 +21,7 @@ pub mod run;
 pub mod sniff;
 pub mod temp;
 pub mod text;
+pub mod view;
 pub mod win;
 
 use std::sync::Arc;
@@ -34,6 +35,7 @@ pub use run::{
     CleanupFailure, ReportTargetError, RunRequest, WriteReportError, run_analysis, validate_report_targets,
     write_new_file,
 };
+pub use view::{DecodedImage, ViewError, decode_for_view};
 
 /// 工具版本（workspace 的 version，單一來源）。
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
