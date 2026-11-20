@@ -242,6 +242,33 @@ C++ 版有些問題代碼來自 libpng 的警告：`metadata_parse_failed`（警
   - core 的取消訊息是 `cancelled by user (Ctrl+C / Ctrl+Break)`，GUI 按「取消」時也是這句，因為報告文字要和 CLI 及 C++ 版相同。
 - Slint 免版稅授權：關於畫面放 `AboutSlint`；deny.toml 的授權例外與 advisories 忽略見 docs/dependencies.md。
 
+### D-R15 WebP：image-webp 只解 VP8L chunk，解碼輸入的 alpha 提示位元設為 1（2026-11-20，階段 3）
+
+WebP 前端照 C++ 版：
+- 自己的 RIFF 掃描（移植 `webp_scan`）負責容器完整性、VP8X 旗標一致性與 `alpha_hint_mismatch`。
+- 只解 still VP8L；lossy（VP8）與動畫回報不支援。
+- 整張影像解出後依列寫進這一側的 delete-on-close 暫存檔，再逐列交給引擎（對應 C++ 版 WholeImageDecoder）。
+
+**解碼器的輸入**：從檔案取出第一個 VP8L chunk 的內容，在記憶體裡包成只含這個 chunk 的簡單格式 RIFF（`RIFF` + 大小 + `WEBPVP8L` + chunk 大小 + 內容 + 奇數長度時的補齊位元組），交給 image-webp 0.2.4。
+- **會修改的只有一個位元**：VP8L 標頭的 alpha_is_used 設為 1。
+- **內容照檔案實際的位元組原樣傳入**，不補資料、不改長度。chunk 大小是實際長度，奇數時只在 RIFF 層補一個 0，和 RIFF 規則相同。所以截斷的位元串流仍由解碼器回報錯誤，判定和 C++ 版一致。
+- **只影響解碼輸入，不影響容器判定**：
+  - 容器狀態、旗標與提示的核對都在掃描階段，依檔案原本的位元組完成。
+  - 報告裡的 `chunks`、`coverage`、`alpha_hint_mismatch` 都來自掃描，不是來自包裝後的資料。
+
+理由（2026-11-20 用 C++ 版的測試圖驗證）：
+- image-webp 解碼 VP8L 位元串流時讀過 alpha_is_used 但不使用，只拿它（簡單格式）或 VP8X 的 alpha 旗標（擴充格式）決定要不要把 alpha 丟掉、只輸出 RGB。C++ 版用 libwebp 的 MODE_RGBA，一律拿到完整的 RGBA，再依實際的 alpha 決定以 RGB 或 RGBA 比較。
+  - 直接把整個檔案交給 image-webp 時，`s3_webp_hint_off_alpha40.webp`（提示關閉但 alpha=64）的 alpha 會被丟掉。包裝後 35 個像素的 alpha=64 全部保留。
+- image-webp 遇到 VP8X 的 EXIF／XMP／動畫旗標和內容不符時會整個拒絕（`ChunkMissing`），C++ 版只發 `webp_container_warning` 照樣解碼。只交 VP8L chunk 就不經過它的 VP8X 檢查。
+- alpha 為 0 底下的 RGB 會保留：`s3_webp_rgba8_icc.webp` 的 358 個 alpha=0 像素和原始 PNG 逐值相同，`s3_webp_rgba8_hidden_lsb.webp` 的 1 LSB 差異也找得到。
+- VP8L 截斷（`s3_webp_vp8l_cut.webp`）：image-webp 回傳 `BitStreamError`，C++ 版是 libwebp `BITSTREAM_ERROR`，兩者都判為 `decode_failed`／`decode_error`。
+  - 對應規則：`IoError(UnexpectedEof)` 判為 `truncated`，`MemoryLimitExceeded` 判為 `resource_limit`，其餘判為 `decode_error`。
+  - 錯誤文字是 `image-webp: <錯誤>`，C++ 版是 `libwebp: <狀態>`，列在允許差異。
+
+**記憶體預估**：整圖型解碼器的預估值沿用 C++ 版第 3 階段量測 libwebp 得到的公式：(8 B/px + px/8 + 檔案大小 + 4 MiB) × 1.15。這樣 `job_commit_mib` 的上限判定和建議值和 C++ 版一致。
+- image-webp 的實際用量不同：記憶體裡有 VP8L 內容的一份複本、整張 RGBA 輸出（4 B/px）和解碼器內部的 ARGB 緩衝。
+- Rust 版沒有 Job Object（D-R02），這個預估只用來判定，不是硬上限。
+
 ## 允許的差異
 
 比對腳本讀這張表；表格以外的差異一律算失敗。欄位為 JSON 的點路徑，或 `exit`、`stderr`、`markdown`；可用 `*` 萬用字元。
@@ -269,3 +296,5 @@ C++ 版有些問題代碼來自 libpng 的警告：`metadata_parse_failed`（警
 | png_ztxt_broken_keyword_latin1 | *.decoder_warnings* | 同 broken_ztxt_output |
 | png_exif_over_limit_orientation_differs | issues[*].message | 同 broken_ztxt_output（`eXIf: length exceeds libpng limit`） |
 | png_exif_over_limit_orientation_differs | *.decoder_warnings* | 同 broken_ztxt_output |
+| webp_vp8l_truncated | issues[*].message | 解碼錯誤文字 `image-webp: BitStreamError` 對 `libwebp: BITSTREAM_ERROR`；代碼與判定相同（D-R15） |
+| webp_vp8l_truncated | *.decoder_errors[*] | 同上 |
