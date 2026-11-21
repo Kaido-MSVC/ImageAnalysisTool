@@ -132,6 +132,8 @@ D-R04、D-R05、D-R07，以及階段 0 的其他增補（D-R01、D-R06、D-R08�
 - worker：見 D-R02 第二次修訂，階段 6 起產出獨立的 `iat-worker.exe`，和 `iat.exe` 放在同一個資料夾。
 - 在那之前（階段 1～5），IMB-C 不能直接使用 Rust 版；比對只靠 `tests/compare`。
 
+**補查 `decode_path`（2026-11-21，唯讀，IMB-C commit `b1fa739`）**：IMB-C 整個 repo（不含 `target`）沒有出現 `decode_path` 字樣，`src/iat.rs` 的 `parse_report`／`retry_limits` 讀的欄位也和上表相同。Rust 版改了 `decode_path` 的值（D-R11）不影響 IMB-C。
+
 ### D-R11 PNG 解碼：png crate 只解 IDAT，其餘由 png_scan 決定（2026-11-20，階段 1）
 
 第 2 步驗證（2026-11-20）：png 0.18.1 以 `Transformations::IDENTITY` 交出未經轉換的列。有 `.truth` 的 11 張 PNG 逐值相同；7 組 Adam7 與對應的非交錯圖逐值相同；16-bit 為大端序原值，1/2/4-bit 與調色盤索引不展開，tRNS 不套用。展開規則照 C++ 版 `expand_row` 自己做。
@@ -286,7 +288,7 @@ WebP 前端照 C++ 版：
 - 涵蓋 RGB 8／16 位元 Raw 與 RLE、灰階、Bitmap、Indexed。
 - PSB 比 PSD 上限 30000 更寬或更高的影像。
 
-C++ 版的訊息 `image resource 0x<id> name runs past the resource section` 在 `0x` 後面印的是十進位的 id，照抄以保持一致。
+C++ 版的訊息 `image resource 0x<id> name runs past the resource section` 在 `0x` 後面印的是十進位的 id，照抄以保持一致。這是 **C++ 版的錯誤**：Rust 版為了和 C++ 1.0.0 的輸出一致而刻意保留，2.0.0 時改成正確的十六進位。
 
 ## 允許的差異
 
