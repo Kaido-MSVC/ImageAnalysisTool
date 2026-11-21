@@ -390,6 +390,37 @@ C++ 版的訊息 `image resource 0x<id> name runs past the resource section` 在
 
 新增的直接依賴：jxl 0.8.0（BSD-3-Clause），帶入 jxl_macros、jxl_simd、jxl_transforms、array-init、num-derive、byteorder。`cargo deny check` 通過。
 
+### D-R19 AVIF：rav1d 解碼，平面直接讀取（2026-11-21，階段 6）
+
+**C++ 1.0.0 的實際行為**（`src/engine/avif_side.cpp`，libavif 1.4.2 + aom 3.15.2；CMakeCache：`AVIF_CODEC_AOM=SYSTEM`、`AVIF_CODEC_DAV1D=OFF`、`AVIF_LIBYUV=SYSTEM`）：
+- 從不呼叫 `avifImageYUVToRGB`，所以 libavif 的 YUV→RGB 與 libyuv 的 YUV→RGB 都不會用到，沒有矩陣或捨入要重現。
+- 只解碼「metadata 符合無損」的影像：4:4:4 且 matrix 0（identity），或 4:0:0；全範圍；alpha 不是預乘；單張靜止影像；沒有 clap。平面直接讀取（identity：R = V、G = Y、B = U；4:0:0：Y = 灰階），8-bit 為 uint8，10／12-bit 為原生數值。
+- 其餘組合（4:2:0、4:2:2、BT.601／709／2020 等矩陣、YCgCo-R、limited range、預乘 alpha）一律 `avif_not_lossless_by_metadata`、不解碼。
+- libavif 解碼時本身會做的處理：
+  - alpha 的 AV1 序列標頭為 limited range 時，用 `avifLimitedToFullY` 轉成全範圍：`v = ((v − lo) × full + (hi − lo) / 2) / (hi − lo)`，再夾到 0..full（8-bit 16/235/255、10-bit 64/940/1023、12-bit 256/3760/4095）。
+  - 色彩影像的 range 以 `colr` nclx 為準（覆蓋 AV1 序列標頭），沒有 nclx 才用序列標頭。`s5_avif_444_identity_limited.avif` 就是 nclx 寫 limited、序列標頭寫 full。
+  - `ispe` 與 AV1 畫格尺寸不同時用 `avifImageScaleWithLimit` 縮放（libyuv）。
+  - grid 影像把各 tile 原樣拼接。
+- `avif_job_limit_*` 兩個案例不是 Job Object 擋下的，是解碼前的預估：(w × h × 樣本數 × 6 + 檔案大小 + 48 MiB) 超過 `job_commit_mib` − 64 MiB 時 `resource_limit`，並給建議值（C++ D32）。
+
+**第 2 步驗證**：
+- `crates/iat-av1`：rav1d 1.1.0（不開 `asm`）的安全包裝，unsafe 只在 `src/dav1d.rs`。設定同 libavif 的 dav1d 介面：1 執行緒、`max_frame_delay` 1、`frame_size_limit` 16384²、關閉日誌（預設會寫到 stderr）。
+- 對照：`tools/libavif_gen/dump_avif_planes.cpp` 連結 C++ 建置的靜態 libavif + aom（唯讀，設定同 C++ iat），傾印解出的平面。`crates/iat-av1/examples/verify_planes.rs` 用 rav1d 解同一個 item 後逐值比較。
+- 結果：測試圖中 libavif 能解的 13 張（4:2:0 BT.601 有損、4:4:4 BT.601、identity limited、預乘、灰階、8／10／12-bit、含 alpha 的 4 張）與私人樣本 2 張（`crop8__avif.avif` 無損 4:4:4、`crop8__avif-lossy.avif` 4:2:0），以及從私人樣本 PNG 產生的 12000×8637 無損與有損各 1 張，Y／U／V／A 全部逐值相同。截斷與 box 超出檔尾的 2 張 libavif 在解析階段就拒絕，不比平面。
+- 解碼時間（release，單執行緒）：
+
+| 檔案 | libavif + aom（C++ 建置，有 SIMD） | rav1d 不開 asm（含複製平面） |
+|---|---|---|
+| 12000×8637 無損 4:4:4（110 MB） | 15.4–15.8 s | 13.0 s |
+| 12000×8637 有損 4:2:0（5.9 MB） | 2.2–2.6 s | 5.9 s |
+| crop8__avif.avif 1024×768 無損 | 121–131 ms | 102 ms |
+| crop8__avif-lossy.avif 1024×768 | 17.5 ms | 35 ms |
+| 測試圖（29×11） | — | 0.3–0.8 ms |
+
+**待決**（第 2 步回報後由使用者決定）：見回報。
+
+新增的直接依賴：rav1d 1.1.0（BSD-2-Clause），見 dependencies.md。
+
 ## 允許的差異
 
 比對腳本讀這張表；表格以外的差異一律算失敗。欄位為 JSON 的點路徑，或 `exit`、`stderr`、`markdown`；可用 `*` 萬用字元。
