@@ -2106,6 +2106,7 @@ version = "0.1.0"
 dependencies = [
  "apeireth-image-psd",
  "crc32fast",
+ "iat-av1",
  "image-webp",
  "jxl",
  "miniz_oxide 0.8.9",
