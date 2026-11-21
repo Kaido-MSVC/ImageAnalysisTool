@@ -182,6 +182,18 @@ mod tests {
     }
 
     #[test]
+    fn jxl_matches_the_png_and_keeps_native_depth() {
+        let view = |n: &str| decode_for_view(&fixture(n), None, &Limits::default(), u64::MAX, &CancelToken::new());
+        let png = view("s3_rgba8_srgb.png").expect("png decodes");
+        let jxl = view("s3_jxl_rgba8_srgb.jxl").expect("jxl decodes");
+        assert_eq!((jxl.model, jxl.bits, jxl.rows), ("rgba", 8, jxl.height));
+        assert_eq!(jxl.samples, png.samples);
+        let twelve = view("s3_jxl_rgb12_600x40.jxl").expect("12-bit jxl decodes");
+        assert_eq!(twelve.bits, 12);
+        assert!(twelve.samples.iter().all(|&v| v < 4096));
+    }
+
+    #[test]
     fn pixel_cap_stops_before_allocating() {
         let e = decode_for_view(&fixture("png_gray16_trns.png"), None, &Limits::default(), 1, &CancelToken::new())
             .unwrap_err();
