@@ -166,7 +166,9 @@ mod tests {
     fn tiff_strips_and_tiles_match_the_png() {
         let view = |n: &str, lim: &Limits| decode_for_view(&fixture(n), None, lim, u64::MAX, &CancelToken::new());
         let png = view("s2_rgb16_icc1.png", &Limits::default()).expect("png decodes");
-        for n in ["s2_tif_rgb16_be_strip_lzw.tif", "s2_tif_rgb16_le_tile_deflate.tif", "s2_btf_rgb16_be_tile_deflate.tif"] {
+        for n in
+            ["s2_tif_rgb16_be_strip_lzw.tif", "s2_tif_rgb16_le_tile_deflate.tif", "s2_btf_rgb16_be_tile_deflate.tif"]
+        {
             let img = view(n, &Limits::default()).expect("tiff decodes");
             assert_eq!((img.model, img.bits, img.rows), ("rgb", 16, img.height), "{n}");
             assert_eq!(img.samples, png.samples, "{n}");
