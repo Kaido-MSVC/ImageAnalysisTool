@@ -163,6 +163,23 @@ mod tests {
     }
 
     #[test]
+    fn tiff_strips_and_tiles_match_the_png() {
+        let view = |n: &str, lim: &Limits| decode_for_view(&fixture(n), None, lim, u64::MAX, &CancelToken::new());
+        let png = view("s2_rgb16_icc1.png", &Limits::default()).expect("png decodes");
+        for n in ["s2_tif_rgb16_be_strip_lzw.tif", "s2_tif_rgb16_le_tile_deflate.tif", "s2_btf_rgb16_be_tile_deflate.tif"] {
+            let img = view(n, &Limits::default()).expect("tiff decodes");
+            assert_eq!((img.model, img.bits, img.rows), ("rgb", 16, img.height), "{n}");
+            assert_eq!(img.samples, png.samples, "{n}");
+        }
+        // 一排 tile 超過預算的一半：逐 tile 寫進暫存再依列重組，樣本與 strip 版相同
+        let mut small = Limits::default();
+        small.set("buffer_mib=8").expect("valid limit");
+        let tile = view("s2_tif_rgb16_4096x300_tile256.tif", &small).expect("tile via temp");
+        let strip = view("s2_tif_rgb16_4096x300_strip16_be.tif", &small).expect("strips");
+        assert_eq!(tile.samples, strip.samples);
+    }
+
+    #[test]
     fn pixel_cap_stops_before_allocating() {
         let e = decode_for_view(&fixture("png_gray16_trns.png"), None, &Limits::default(), 1, &CancelToken::new())
             .unwrap_err();
