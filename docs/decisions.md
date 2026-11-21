@@ -296,6 +296,58 @@ WebP 前端照 C++ 版：
 
 C++ 版的訊息 `image resource 0x<id> name runs past the resource section` 在 `0x` 後面印的是十進位的 id，照抄以保持一致。這是 **C++ 版的錯誤**：Rust 版為了和 C++ 1.0.0 的輸出一致而刻意保留，2.0.0 時改成正確的十六進位。
 
+### D-R17 TIFF：自己讀 strip／tile，照 libtiff 4.7.2 的行為（2026-11-21，階段 4）
+
+**第 2 步驗證的結論**（使用者選擇做法 B）：tiff crate 0.11.3 對正常的測試圖能交出和 libtiff 相同的樣本，但下列情況對不上：
+- ExtraSamples=0 時丟掉第 4 個聲道（驗收案例 `tiff_unspecified_alpha` 會不一致）。
+- 不支援 MinIsWhite 加 alpha。
+- 忽略 FillOrder。
+- Deflate 會讀超過 byte count。
+- 不會產生 libtiff 的警告。
+- 沒有 strip chopping，也沒有 libtiff 的配置上限。
+
+所以不用 tiff crate。
+
+**做法**（`crates/iat-core/src/tiff_scan.rs`、`tiff_side.rs`、`tiff_codec.rs`）：
+- `tiff_scan` 逐行移植 C++ 版，IFD 解析也給解碼器使用。支援範圍與 C++ 1.0.0 相同：多頁、SubIFD、分平面、非無號整數、8／16 以外的位元深度、Photometric 大於 2、不符的 ExtraSamples、Predictor 3 都在解碼前回報不支援；壓縮只解 none、LZW、Deflate（8 與 32946）、PackBits，其餘為 `not_checked`／`compression_not_supported`。
+- 目錄層級照 libtiff 4.7.2 的 `TIFFReadDirectory`：
+  - 未壓縮單一 strip 切成約 8192 bytes 的多條（`STRIP_SIZE_DEFAULT`），預算與失敗時的 `rows_decoded` 都以切分後的 strip 為準。
+  - StripByteCounts 的「Bogus」「Wrong」修正與警告。
+  - tag 未依序排列的警告；已知 ASCII tag 結尾缺 NUL 的警告。
+- 區塊讀取照 `TIFFReadEncodedStrip`／`TIFFReadEncodedTile`：
+  - 未壓縮時從 offset 直接讀整塊大小，不看 byte count。
+  - 壓縮時讀 byte count，過大時照 libtiff 限制並發警告。
+  - FillOrder 2 先反轉位元；16 位元換成主機順序。
+  - Predictor 只在 LZW／Deflate 時套用（libtiff 的 none 與 PackBits 不設定預測器）。
+  - MinIsWhite 只反轉灰階，alpha 不動。
+- 解壓：
+  - PackBits 逐行移植 `PackBitsDecode`，連警告一起。
+  - Deflate 用 miniz_oxide，照 `ZIPDecode`：輸出滿了就停，但和 zlib 一樣在同一份輸入裡處理到結尾時檢查 Adler-32；串流比需要的短、輸入用完、zlib 檔頭錯誤的處理和訊息都照 libtiff 與 zlib。
+  - LZW 用 weezl 0.1.12（TIFF 早換碼寬、輸出滿了就停），照 `LZWDecode`：不要求 EOI，輸入用完是「not terminated with EOI code」，EOI 太早是「Not enough data」；舊式位元反轉碼改用 LSB 順序解，並發 libtiff 的警告。
+- 配置上限：照 C++ 版給 libtiff 的設定，單筆 max(`buffer_mib`, `metadata_item_mib`)、累計 `buffer_mib + metadata_file_mib`，記帳模擬 libtiff 的主要配置：目錄項目、tag 值、strip／tile 表（轉成 64 位元陣列）、strip chopping 的新表、壓縮資料讀取緩衝（1 MiB 起、每次乘 10）、LZW 解碼表。
+  - strip／tile 表配置失敗時開檔失敗，判為 `not_checked`／`resource_limit`（`tiff_libtiff_alloc_limit` 與 C++ 版的 `decoder_errors` 逐字相同）。
+  - 其他 tag 配置失敗時照 libtiff 略過，只在之後解碼失敗時改判為 `resource_limit`。
+- C++ 版的「libtiff 目錄與掃描結果不符」（`decoder_disagrees_with_scan`）檢查：Rust 版只有一份 IFD 解析，這些比較必然一致，只保留區塊個數的檢查。
+- 問題訊息的字首是 `tiff decoder` 對 C++ 版的 `libtiff`，括號內 libtiff 的錯誤文字盡量照原樣產生；`decoder_errors`／`decoder_warnings` 只有 zlib 的資料錯誤文字不同（miniz_oxide 不區分錯誤種類，例如 `invalid distance too far back` 回報為 `incorrect data check`）。這些都列在允許差異。
+- 輸入不可信：offset、byte count、尺寸的算術一律做溢位檢查（`checked_*`），來自檔案的索引用 `get()`；`decode_path` 改名為 `tiff-strips-encoded`、`tiff-tiles-encoded`（允許差異）。
+
+**已知風險（libtiff 讀目錄時的警告沒有全部重做）**：libtiff 4.7.2 的 `TIFFReadDirectory` 還有其他警告，Rust 版遇到時不會產生對應的 `decoder_warning`，問題代碼就會和 C++ 版不同。目前的測試圖、20 張變形檔與真實樣本都沒有觸發。
+
+沒有重做的警告：
+- tag 的 count、型別或值不正確而略過（`Incorrect count/value for "…"; tag ignored`、`Wrong data type … for "…"`、`incorrect count for field …`）。
+- 超過檔案大小的配置請求（`Requested memory size … is greater than filesize`），只重做了 strip chopping 的那一則。
+- OJPEG／YCbCr 專用的修正。這些在支援範圍外，會先回報不支援。
+
+另外：
+- 未知 tag 的警告在 libtiff 4.7 預設關閉，C++ 版沒有打開，所以不需要。
+- 大於 2 GB 的未壓縮 strip 的虛擬切分（`TryChopUpUncompressedBigTiff`）也沒有做，只影響失敗時的 `rows_decoded` 與預算。
+
+**驗證**：
+- 比對腳本的 TIFF 案例（測試圖全部 inspect、`pairs.json` 的 TIFF 配對、C++ `run_e2e.py` 的預算／tile 暫存／libtiff 配置上限案例、20 張變形檔與 6 組配對）全部和 C++ 版一致，允許的只有訊息文字。
+- 變形檔放在 `tests/fixtures/tiff_variants/`，連同產生腳本，改法與 C++ 1.0.0 的結果見該資料夾的 README，SHA-256 記在 `tests/fixtures/SHA256SUMS`。
+
+新增的直接依賴：weezl 0.1.12（MIT OR Apache-2.0，原本已在 Cargo.lock 中，經 GUI 依賴帶入）。
+
 ## 允許的差異
 
 比對腳本讀這張表；表格以外的差異一律算失敗。欄位為 JSON 的點路徑，或 `exit`、`stderr`、`markdown`；可用 `*` 萬用字元。
@@ -325,3 +377,17 @@ C++ 版的訊息 `image resource 0x<id> name runs past the resource section` 在
 | png_exif_over_limit_orientation_differs | *.decoder_warnings* | 同 broken_ztxt_output |
 | webp_vp8l_truncated | issues[*].message | 解碼錯誤文字 `image-webp: BitStreamError` 對 `libwebp: BITSTREAM_ERROR`；代碼與判定相同（D-R15） |
 | webp_vp8l_truncated | *.decoder_errors[*] | 同上 |
+| tiff_corrupt_deflate_data | issues[*].message | 解碼失敗訊息字首 `tiff decoder` 對 `libtiff`，括號內 libtiff 的錯誤文字相同；代碼、狀態、`rows_decoded` 相同（D-R17） |
+| tiffinspect_s2_tif_bad_deflate | issues[*].message | 同 tiff_corrupt_deflate_data |
+| tiffvar_v_deflate_last_short | issues[*].message | 同 tiff_corrupt_deflate_data |
+| tiffvar_v_deflate_short_mid | issues[*].message | 同 tiff_corrupt_deflate_data |
+| tiffvar_v_lzw_corrupt | issues[*].message | 同 tiff_corrupt_deflate_data |
+| tiffvar_v_lzw_no_eoi | issues[*].message | 同 tiff_corrupt_deflate_data |
+| tiffvar_v_lzw_short_mid | issues[*].message | 同 tiff_corrupt_deflate_data |
+| tiffvar_v_lzw_tile_short | issues[*].message | 同 tiff_corrupt_deflate_data |
+| tiffvar_v_packbits_short_last | issues[*].message | 同 tiff_corrupt_deflate_data |
+| tiffvar_v_packbits_short_mid | issues[*].message | 同 tiff_corrupt_deflate_data |
+| tiffvar_v_rgb8_fill2_deflate | issues[*].message | 同 tiff_corrupt_deflate_data |
+| tiff_libtiff_alloc_limit | issues[*].message | 字首 `tiff decoder allocation limit` 對 `libtiff allocation limit`，其餘文字與 `decoder_errors` 相同（D-R17） |
+| tiffvar_v_deflate_corrupt | issues[*].message | 同 tiff_corrupt_deflate_data；另外 zlib 的 `invalid distance too far back` 在 miniz_oxide 回報為 `incorrect data check`（D-R17） |
+| tiffvar_v_deflate_corrupt | *.decoder_errors[*] | 同上 |
