@@ -4,7 +4,7 @@ Nov 21, 2026 · @YU SIANG CHEN
 
 ## 總覽
 
-八個階段完成了前五個（階段 0 到 4）。比對腳本中已涵蓋的 267 個案例全部和 C++ 版 1.0.0 一致，允許的差異只有訊息文字。下一步是階段 5（JXL）。
+八個階段完成了前六個（階段 0 到 5）。比對腳本中已涵蓋的 310 個案例全部和 C++ 版 1.0.0 一致；允許的差異除了訊息文字，只有 JXL 的兩項（暫時缺少的 `layered_image` 與一張非 XYB 有損圖的誤差統計，見 D-R18）。下一步是階段 6（AVIF 與 worker）。
 
 | 階段 | 內容 | 狀態 | 比對結果 |
 | --- | --- | --- | --- |
@@ -13,11 +13,11 @@ Nov 21, 2026 · @YU SIANG CHEN
 | 2 | GUI 第一版（Slint） | 完成 | GUI 匯出的 JSON 與 CLI 相同 |
 | 3 | WebP、PSD/PSB | 完成 | WebP 24/24、PSD/PSB 25/25 |
 | 4 | TIFF | 完成 | 134/134 |
-| 5 | JXL | 尚未開始 | — |
+| 5 | JXL | 完成 | 43/43 |
 | 6 | AVIF（rav1d）與 worker | 尚未開始 | — |
 | 7 | 收尾：封包、圖示、版本 2.0.0、IMB-C 實測 | 尚未開始 | — |
 
-階段 1、3、4 的 235 個格式案例中，問題代碼、`decode_status`、`rows_decoded`、色彩與 metadata 判定都和 C++ 版相同。
+階段 1、3、4、5 的 278 個格式案例中，問題代碼、`decode_status`、`rows_decoded`、色彩與 metadata 判定都和 C++ 版相同。
 
 ## 各階段成果
 
@@ -70,6 +70,17 @@ Nov 21, 2026 · @YU SIANG CHEN
 - 順帶修正：GUI 檢視在配置解碼緩衝之前就檢查檢視上限（原本先配置再檢查，超大影像會白白配置）。
 - 單元測試涵蓋畸形大小與位移（溢位、超出檔案、2^31 的 tile、2^32−1 的寬度），都回報錯誤而不會 panic。
 
+**階段 5：JPEG XL**（提交 d0fe99f 起）
+
+- 解碼用 `jxl` crate 0.8.0（jxl-rs）：不轉向、不渲染 spot color、不反乘，10／12-bit 交出原生數值；無損樣本在所有測試圖上都和 libjxl 逐值相同。`jxl_scan` 逐行移植（D-R18）。
+- libjxl 從色彩列舉值產生的 ICC 不移植，改用查表：小 C++ 程式連結 C++ 建置裡的 libjxl 0.12.0 產生 289 筆（269,112 bytes），sRGB、灰階、PQ、HLG 的雜湊和 C++ 版相同；資料、產生程式與 BSD-3 授權（`licenses/`）一起提交。自訂白點／原色／gamma 查不到，記為已知差異。
+- jxl-rs 沒有公開的 extra channel 位元深度，自己解析 ImageMetadata（讀到色彩空間為止），對所有 JXL 測試圖和 jxl-rs 交叉核對。
+- jxl-rs 0.8.0 沒有實作 `coalescing = false`，無法得知圖層數：`jxl_two_layers_vs_composite_png` 的 `layered_image`（info）暫列允許差異，給上游的修改提案草稿在 `docs/jxl-rs-upstream-proposal.md`，等你決定是否提交。
+- 非 XYB 的有損測試圖用 libjxl 0.12.0 產生：C++ 版會解碼；jxl-rs 的樣本有少量最低位元差異，判定、不同的像素數與最大誤差相同，只有 mae／rmse 與一個差異樣本值不同（只對這個案例允許）。
+- 配置上限：jxl-rs 沒有分配器掛鉤，只做事前預估（C++ 公式），記為已知差異；階段 6 評估讓 JXL 也走 worker。
+- 比對腳本新增 `issues[code=X]` 的允許方式（只略過 C++ 版的那一筆問題），允許的數值差異也換回 Markdown。
+- 私人樣本的 4 個 JXL 案例（IMB-C 的無損與有損）一致；GUI 能開 JXL（比對、結果與影像檢視都實測過），開檔對話方塊加上 JXL。
+
 ## 重要決策
 
 完整內容在 repo 的 `docs/decisions.md`，這裡只列重點。規劃書 `docs/plan.md` 本身沒有改動，所有修訂都記在這些編號裡。
@@ -86,6 +97,7 @@ Nov 21, 2026 · @YU SIANG CHEN
 | D-R15 | WebP：只取 VP8L 內容重新包裝，把 `alpha_is_used` 設為 1 再解碼 |
 | D-R16 | PSD/PSB：照 C++ 1.0.0 範圍；ZIP、CMYK、32-bit 延到 2.0.0 當成新功能 |
 | D-R17 | TIFF：不用 tiff crate，自己讀 strip／tile 並照 libtiff 4.7.2 的行為；libtiff 讀目錄時的部分警告沒有重做，列為已知風險 |
+| D-R18 | JXL：jxl-rs 解碼、libjxl 的 ICC 查表、自己解析 ImageMetadata；圖層數、配置上限與自訂色彩列舉值的 ICC 是已知差異 |
 
 **AV1 的方向（階段 6 適用）**：rav1d 1.1.0 關掉 `asm`，只開 `bitdepth_8`、`bitdepth_16`；包裝層獨立成 `crates/iat-av1`。rav1d 內部有大量 unsafe，所以放進 worker 隔離。本機有 NASM 3.02，只在實測太慢時才開 asm。
 
@@ -105,7 +117,7 @@ Nov 21, 2026 · @YU SIANG CHEN
 
 ## 待辦與下一步
 
-下一步是階段 5（JXL）。
+下一步是階段 6（AVIF 與 worker）；恢復 worker 時一併評估 JXL 是否也走 worker（D-R18）。
 
 **已完成的小項目**（2026-11-21）
 
@@ -117,6 +129,7 @@ Nov 21, 2026 · @YU SIANG CHEN
 
 - TIFF：libtiff 讀目錄時的部分警告（tag 的 count／型別不正確而略過等）沒有重做，遇到時問題代碼會和 C++ 版不同（D-R17）。
 - PNG：gAMA、sRGB、iCCP 的 libpng 內容檢查仍未經真實樣本驗證（D-R12）。
+- JXL：多圖層的靜止影像不產生 `layered_image`；libjxl 配置超過硬上限的情況不會判為 `resource_limit`；自訂色彩列舉值沒有 ICC（D-R18）。
 
 **留到後面階段**
 
@@ -124,6 +137,7 @@ Nov 21, 2026 · @YU SIANG CHEN
 - [ ] 階段 7：版本改為 2.0.0、設計程式圖示（C++ 版沒有圖示，要重新設計）、IMB-C 不改程式實測換用
 - [ ] GUI：記住介面語言的設定
 - [ ] 在 C++ repo 開 issue，記下上一節的問題
+- [ ] 決定是否把 `docs/jxl-rs-upstream-proposal.md` 提交給 jxl-rs 上游；上游支援後補做 `layered_image`
 
 **2.0.0 之後的新功能**
 
