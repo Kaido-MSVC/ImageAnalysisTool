@@ -205,6 +205,14 @@ if os.path.isdir(VAR):
         cases.append(Case("tiffvar_pair_" + a[:-4], ["compare", v(a), b]))
 
 
+# ---- JPEG XL (stage 5): files written with the C++ build's libjxl (tests/fixtures/jxl_generated, D-R18)
+JXLGEN = os.path.join(FIX, "..", "jxl_generated")
+if os.path.isdir(JXLGEN):
+    lossy = os.path.join(JXLGEN, "v_jxl_rgb16_lossy_vardct_noxyb.jxl")
+    cases.append(Case("jxlgen_lossy_noxyb_vs_png", ["compare", fx("s3_rgb16_600x40_srgb.png"), lossy]))
+    cases.append(Case("jxlgen_inspect_lossy_noxyb", ["inspect", lossy]))
+
+
 def make_sparse(d):
     p = os.path.join(d, "sparse_16gib.bin")
     open(p, "wb").close()
@@ -379,6 +387,14 @@ def tolerate_md(lines, diffs, c):
     for rv, cv in list(pairs.items()):
         if md_escape(rv) != rv or md_escape(cv) != cv:
             pairs[md_escape(rv)] = md_escape(cv)
+    # Allowed numeric differences (the mae / rmse of a lossy decode, D-R18): Markdown prints floats with
+    # 6 significant digits (C++ ostream default) and integers as they are.
+    for f, cv, rv in diffs:
+        nums = all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in (cv, rv))
+        if nums and cv != rv and allowed(c.name, f):
+            fmt = (lambda v: "%g" % v) if isinstance(cv, float) or isinstance(rv, float) else str
+            if fmt(rv) != fmt(cv):
+                pairs[fmt(rv)] = fmt(cv)
     subs = sorted(pairs.items(), key=lambda s: -len(s[0]))
     out = []
     for line in lines:
@@ -399,11 +415,22 @@ def compare(c, a, b):
     if sa != sb:
         diffs.append(("stderr", sa, sb))
     ja, jb = json_of(a), json_of(b)
+    dropped = [r[1][len("issues[code="):-1] for r in ALLOWED
+               if r[1].startswith("issues[code=") and r[1].endswith("]") and fnmatch.fnmatchcase(c.name, _pat(r[0]))]
     if (ja is None) != (jb is None):
         diffs.append(("report.json", "present" if ja else "absent", "present" if jb else "absent"))
     elif ja is not None:
         # The case directory differs per side: mask it in the raw text (JSON-escaped form) before parsing.
-        fa = flatten(mask_json(json.loads(mask_text(ja.encode("utf-8"), a["dir"]))))
+        ja_obj = json.loads(mask_text(ja.encode("utf-8"), a["dir"]))
+        # An allowed row whose field is "issues[code=X]" drops the C++ issues with code X before comparing
+        # (an issue the Rust decoder cannot produce yet, e.g. layered_image in D-R18); every other issue
+        # is still compared position by position.
+        if dropped and isinstance(ja_obj.get("issues"), list):
+            kept = [i for i in ja_obj["issues"] if i.get("code") not in dropped]
+            if len(kept) != len(ja_obj["issues"]):
+                diffs.extend(("issues[code=%s]" % d, "present", None) for d in dropped)
+            ja_obj["issues"] = kept
+        fa = flatten(mask_json(ja_obj))
         fb = flatten(mask_json(json.loads(mask_text(jb.encode("utf-8"), b["dir"]))))
         for k in sorted(set(fa) | set(fb)):
             if fa.get(k, "<absent>") != fb.get(k, "<absent>"):
@@ -415,7 +442,8 @@ def compare(c, a, b):
     if (ma is None) != (mb is None):
         diffs.append(("markdown", "present" if ma else "absent", "present" if mb else "absent"))
     elif ma is not None:
-        la = mask_md(mask_text(ma, a["dir"])).split("\n")
+        la = [line for line in mask_md(mask_text(ma, a["dir"])).split("\n")
+              if not any(line.startswith("| `%s` |" % d) for d in dropped)]
         lb = tolerate_md(mask_md(mask_text(mb, b["dir"])).split("\n"), diffs, c)
         if la != lb:
             i = next((k for k, (x, y) in enumerate(zip(la, lb)) if x != y), min(len(la), len(lb)))
