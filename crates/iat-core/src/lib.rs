@@ -23,6 +23,7 @@ pub mod run;
 pub mod sniff;
 pub mod temp;
 pub mod text;
+pub mod tiff_scan;
 pub mod view;
 pub mod webp_scan;
 pub mod webp_side;
