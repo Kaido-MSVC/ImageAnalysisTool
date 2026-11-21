@@ -1,14 +1,19 @@
 //! GUI 檢視用的解碼：整張影像的正規樣本，不做任何轉換（16-bit 完整保留，顯示用的 8-bit 轉換在 GUI 裡做）。
+//!
+//! AVIF 在 iat-worker.exe 裡解碼（rav1d 的 unsafe 不進 GUI 程序，D-R02 第三次修訂）；其他格式都是
+//! 純 safe 的 Rust 解碼器，留在 GUI 程序裡，樣本不必再經過管線複製一次（評估見 D-R02）。
 
 use std::fmt;
 use std::path::Path;
 
-use crate::engine::{ViewStop, decode_view_samples};
+use crate::engine::{VecSink, ViewSamples, ViewStop, decode_view_samples};
 use crate::input::Input;
 use crate::paths::{full_path, is_directory, trim_dir};
 use crate::run::open_read_only;
+use crate::sniff::sniff_format;
 use crate::temp::RunTemp;
-use crate::{CancelToken, Limits, win};
+use crate::worker::{WorkerFiles, WorkerMode, WorkerSettings, describe_failure, read_view_stdout, run_worker};
+use crate::{CancelToken, Limits, NoProgress, win};
 
 /// 解碼後的樣本。`samples` 依列排列，每個像素 `channels` 個值，值域 0..2^bits-1。
 #[derive(Clone, Debug)]
@@ -98,14 +103,17 @@ pub fn decode_for_view(
     let free = win::disk_free_bytes(&dir).map_err(|e| ViewError::Temp(win::error_text(e)))?;
     let run_id = crate::run::new_run_id().map_err(|st| ViewError::Temp(format!("NTSTATUS 0x{:08X}", st as u32)))?;
     let mut temp = RunTemp::create(&dir, &run_id).map_err(|e| ViewError::Temp(e.to_string()))?;
-    let res = decode_view_samples(&input, temp.files[0].as_ref(), free, limits, max_pixels, cancel);
+    let res = if sniff_format(input.head()) == "avif" {
+        view_in_worker(&file, &temp, free, limits, max_pixels, cancel)
+    } else {
+        let mut sink = VecSink::default();
+        decode_view_samples(&input, temp.files[0].as_ref(), free, limits, max_pixels, cancel, &mut sink)
+            .map_err(stop_error)
+            .map(|v| (v, sink.samples))
+    };
     // 關閉即刪除；檢視用的暫存檔留下時只能交給下次執行的舊檔清理。
     temp.close();
-    let v = res.map_err(|s| match s {
-        ViewStop::Cancelled => ViewError::Cancelled,
-        ViewStop::TooLarge(b) => ViewError::TooLarge(b),
-        ViewStop::OverViewLimit { width, height } => ViewError::OverViewLimit { width, height },
-    })?;
+    let (v, samples) = res?;
     if v.layout.channels == 0 {
         return Err(if crate::engine::has_frontend(&v.format) {
             ViewError::Decode(v.error.unwrap_or_default())
@@ -123,9 +131,67 @@ pub fn decode_for_view(
         channels: v.layout.channels,
         bits: v.layout.bits,
         rows: v.rows,
-        samples: v.samples,
+        samples,
         error: v.error,
     })
+}
+
+fn stop_error(s: ViewStop) -> ViewError {
+    match s {
+        ViewStop::Cancelled => ViewError::Cancelled,
+        ViewStop::TooLarge(b) => ViewError::TooLarge(b),
+        ViewStop::OverViewLimit { width, height } => ViewError::OverViewLimit { width, height },
+    }
+}
+
+/// 在 worker 裡解碼（套用 `limits.job_commit_mib` 的 Job 上限），樣本經 stdout 傳回。
+fn view_in_worker(
+    file: &std::fs::File,
+    temp: &RunTemp,
+    free: u64,
+    limits: &Limits,
+    max_pixels: u64,
+    cancel: &CancelToken,
+) -> Result<(ViewSamples, Vec<u16>), ViewError> {
+    let [Some(ta), Some(tb)] = &temp.files else {
+        return Err(ViewError::Temp("temporary files are not available".into()));
+    };
+    let settings = WorkerSettings {
+        mode: WorkerMode::View,
+        limits: *limits,
+        temp_free: free,
+        av1_failed: [false; 2],
+        view_max_pixels: max_pixels,
+    };
+    let w = run_worker(
+        &settings,
+        WorkerFiles { original: file, output: None, temp: [ta, tb] },
+        cancel,
+        None,
+        &NoProgress,
+        read_view_stdout,
+    );
+    if cancel.is_cancelled() {
+        return Err(ViewError::Cancelled);
+    }
+    if let Some(m) = describe_failure(&w) {
+        // rav1d 的 panic 也在這裡：檢視只回報失敗，不重跑
+        return Err(ViewError::Decode(m));
+    }
+    let Some(o) = w.stdout else { return Err(ViewError::Decode("no output from the worker".into())) };
+    if let Some(e) = o.error {
+        return Err(ViewError::Decode(e));
+    }
+    let h = o.header;
+    match h.stop.as_str() {
+        "too_large" => return Err(ViewError::TooLarge(h.bytes)),
+        "over_view_limit" => return Err(ViewError::OverViewLimit { width: h.width, height: h.height }),
+        _ => {}
+    }
+    let t = o.trailer.unwrap_or_default();
+    let layout = crate::engine::RowLayout::new(crate::engine::model_name(&h.model), h.channels, h.bits);
+    let v = ViewSamples { layout, width: h.width, height: h.height, rows: t.rows, format: h.format, error: t.error };
+    Ok((v, o.samples))
 }
 
 #[cfg(test)]

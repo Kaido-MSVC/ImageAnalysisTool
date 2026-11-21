@@ -5,6 +5,7 @@
 //! `docs/cli-json-contract.md`，和 C++ 版不同的地方記在 `docs/decisions.md`。
 //!
 //! unsafe 只允許出現在 `win` 模組（D-R03）；AV1 的 unsafe 包裝放在獨立的 iat-av1 crate。
+//! 分析在 iat-worker.exe 裡執行（[`worker`]，D-R02 第三次修訂）。
 #![deny(unsafe_code)]
 
 pub mod engine;
@@ -34,6 +35,7 @@ pub mod view;
 pub mod webp_scan;
 pub mod webp_side;
 pub mod win;
+pub mod worker;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -47,6 +49,7 @@ pub use run::{
     write_new_file,
 };
 pub use view::{DecodedImage, ViewError, decode_for_view};
+pub use worker::{worker_available, worker_main};
 
 /// 工具版本（workspace 的 version，單一來源）。
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

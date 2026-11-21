@@ -34,6 +34,12 @@ pub fn latin1_text(raw: &[u8]) -> String {
 /// 有效的 UTF-8 保留；無效、過長編碼或代理區的序列每個起始位元組換成一個 U+FFFD 後重新同步；
 /// 控制字元也換成 U+FFFD。和 `String::from_utf8_lossy` 的替換粒度不同，所以自己解碼。
 pub fn file_text(raw: &[u8]) -> String {
+    utf8_sanitize(raw, false)
+}
+
+/// C++ 版 `utf8_sanitize`：無效的 UTF-8 序列同 [`file_text`]；`keep_controls` 為 true 時保留控制字元
+/// （worker 的 stderr 照原樣含換行）。
+pub fn utf8_sanitize(raw: &[u8], keep_controls: bool) -> String {
     let mut out = String::with_capacity(raw.len());
     let mut i = 0;
     while i < raw.len() {
@@ -63,7 +69,7 @@ pub fn file_text(raw: &[u8]) -> String {
             i += 1;
             continue;
         }
-        let ch = char::from_u32(cp).filter(|_| !is_control(cp)).unwrap_or('\u{FFFD}');
+        let ch = char::from_u32(cp).filter(|_| keep_controls || !is_control(cp)).unwrap_or('\u{FFFD}');
         out.push(ch);
         i += n;
     }

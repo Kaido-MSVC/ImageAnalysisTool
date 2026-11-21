@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/iat-av1", "crates/iat-core", "crates/iat-cli", "crates/iat-gui"]
+members = ["crates/iat-av1", "crates/iat-core", "crates/iat-cli", "crates/iat-gui", "crates/iat-worker"]
 
 [workspace.package]
 version = "0.1.0"
@@ -26,7 +26,8 @@ miniz_oxide = "0.8.9"
 png = "0.18.1"
 rfd = "0.18.0"
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.154"
+# float_roundtrip：worker 的報告經過一次 JSON 解析再輸出，浮點數必須原值往返（D-R02）
+serde_json = { version = "1.0.154", features = ["float_roundtrip"] }
 sha2 = "0.11.1"
 # 階段 4：TIFF 的 LZW 解壓（D-R17）
 weezl = "0.1.12"
@@ -48,7 +49,12 @@ windows-sys = { version = "0.61.2", features = [
     "Win32_Storage_FileSystem",
     "Win32_System_Console",
     "Win32_System_Diagnostics_Debug",
+    "Win32_Security",
     "Win32_Security_Cryptography",
+    "Win32_System_IO",
+    "Win32_System_JobObjects",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
 ] }
 
 [workspace.lints.rust]

@@ -1,8 +1,8 @@
 //! 一次分析的外層流程：唯讀開檔、雜湊、暫存目錄、呼叫引擎、組成最終報告。
 //! 對照 C++ 版 `src/core/run.cpp` 與 `src/core/report_io.cpp`。
 //!
-//! 與 C++ 版的主要差別：引擎在同一程序內執行，沒有 iat-worker.exe 與 Job Object
-//! （見 docs/decisions.md D-R02）；取消與期限在引擎的列與列之間檢查。
+//! 分析在 iat-worker.exe 裡執行，放進套了 job_commit_mib 的 Job Object（docs/decisions.md D-R02
+//! 第三次修訂）；取消與期限由這裡結束 Job，同 C++ 版。
 
 use std::fmt;
 use std::fs::{File, OpenOptions};
@@ -15,7 +15,6 @@ use sha2::{Digest, Sha256};
 
 use std::time::Duration;
 
-use crate::engine::{AnalysisInput, Outcome, analyze};
 use crate::exit::decide_exit;
 use crate::input::{Input, read_full_at};
 use crate::limits::Limits;
@@ -23,6 +22,10 @@ use crate::paths::{file_name_of, full_path, is_directory, parent_dir_of, same_pa
 use crate::report::{Count, FileReport, Report, TestSettings, code};
 use crate::sniff::ext_format;
 use crate::temp::{self, RunTemp};
+use crate::text::utf8_sanitize;
+use crate::worker::{
+    WorkerFiles, WorkerMode, WorkerOutcome, WorkerRun, WorkerSettings, read_report_stdout, run_worker,
+};
 use crate::{CancelToken, Mode, Progress, Stage, ms_since, win};
 
 const FILE_SHARE_READ: u32 = 0x1;
@@ -227,11 +230,9 @@ pub fn run_analysis(req: &RunRequest, cancel: &CancelToken, progress: &dyn Progr
     let (rep_o, in_o) = describe_input(&mut r, req, "original", &req.original, &fo, cancel, progress);
     r.original = rep_o;
     let mut open_failed = in_o.is_none();
-    let mut in_p = None;
     if let (Some(p), Some(h)) = (req.output.as_deref(), fp.as_ref()) {
         let (out, input) = describe_input(&mut r, req, "output", p, h, cancel, progress);
         open_failed |= input.is_none();
-        in_p = input;
         r.output = Some(out);
         if let (Ok(a), Ok(b)) = (&fo, h)
             && let (Some(ia), Some(ib)) = (win::file_identity(a), win::file_identity(b))
@@ -291,25 +292,32 @@ pub fn run_analysis(req: &RunRequest, cancel: &CancelToken, progress: &dyn Progr
     if !open_failed
         && !cancelled_early
         && temp.error.is_none()
-        && let Some(orig) = in_o.as_ref()
+        && let Ok(orig) = fo.as_ref()
         && let Some(mut files) = temp.files.take()
+        && let [Some(ta), Some(tb)] = &files.files
     {
         progress.report(Stage::Analyze, 0, 1);
-        let t_engine = Instant::now();
-        let input = AnalysisInput {
-            mode: req.mode,
-            original: orig,
-            output: in_p.as_ref(),
+        let out_file = fp.as_ref().and_then(|f| f.as_ref().ok());
+        let mut settings = WorkerSettings {
+            mode: if req.mode == Mode::Compare { WorkerMode::Compare } else { WorkerMode::Inspect },
             limits: req.limits,
-            temp: [files.files[0].as_ref(), files.files[1].as_ref()],
-            temp_free_bytes: temp.free_bytes,
-            cancel,
-            progress,
-            deadline: t_engine + Duration::from_secs(req.limits.deadline_s),
+            temp_free: temp.free_bytes,
+            av1_failed: [false; 2],
+            view_max_pixels: 0,
         };
-        let outcome = analyze(&input);
-        r.metrics.time_ms.insert("engine_wall".into(), ms_since(t_engine));
-        // 引擎已結束：關閉 handle 就是最後一次關閉，暫存檔此時必須消失。
+        let deadline = Duration::from_secs(req.limits.deadline_s);
+        let wf = WorkerFiles { original: orig, output: out_file, temp: [ta, tb] };
+        // rav1d 的 panic 會讓 worker 直接結束：把那一側記下來重跑，該側判為解碼錯誤（每側最多一次）。
+        let w = loop {
+            let w = run_worker(&settings, wf, cancel, Some(deadline), progress, read_report_stdout);
+            match w.av1_panic {
+                Some(side) if w.outcome == WorkerOutcome::Exited && !settings.av1_failed[side] => {
+                    settings.av1_failed[side] = true;
+                }
+                _ => break w,
+            }
+        };
+        // worker 已結束（正常結束或隨 Job 被終止）：關閉 handle 就是最後一次關閉，暫存檔此時必須消失。
         for left in files.close() {
             r.add_issue(
                 code::TEMP_CLEANUP_FAILED,
@@ -318,57 +326,118 @@ pub fn run_analysis(req: &RunRequest, cancel: &CancelToken, progress: &dyn Progr
                 format!("temporary file still exists after close: {}", file_name_of(&left)),
             );
         }
-        let wr = match outcome {
-            Outcome::Done(wr) => *wr,
-            Outcome::Cancelled | Outcome::Deadline => {
-                let cancelled = matches!(outcome, Outcome::Cancelled);
-                let reason = if cancelled { "cancelled" } else { "deadline" };
-                set_not_checked(&mut r.original, reason);
-                if let Some(o) = r.output.as_mut() {
-                    set_not_checked(o, reason);
-                }
-                if cancelled {
-                    r.add_issue(code::CANCELLED, "error", "run", "cancelled by user (Ctrl+C / Ctrl+Break)");
-                } else {
-                    let s = req.limits.deadline_s;
-                    r.add_issue(
-                        code::DEADLINE_EXCEEDED,
-                        "error",
-                        "run",
-                        format!("analysis exceeded deadline of {s} s (raise with --limits deadline_s=)"),
-                    );
-                }
-                return finish_report(req, r, t_all);
-            }
-        };
-        // 身分欄位（檔名、大小、雜湊）與執行層級資料保留外層的值。
-        let merge = |dst: &mut FileReport, mut src: FileReport| {
-            src.name = std::mem::take(&mut dst.name);
-            src.path = std::mem::take(&mut dst.path);
-            src.size_bytes = dst.size_bytes;
-            src.sha256 = std::mem::take(&mut dst.sha256);
-            *dst = src;
-        };
-        merge(&mut r.original, wr.original);
-        if let (Some(dst), Some(src)) = (r.output.as_mut(), wr.output) {
-            merge(dst, src);
-        }
-        r.codecs = wr.codecs;
-        r.geometry = wr.geometry;
-        r.samples = wr.samples;
-        r.color = wr.color;
-        r.icc = wr.icc;
-        r.metadata = wr.metadata;
-        r.size = wr.size;
-        r.strict = wr.strict;
-        r.issues.extend(wr.issues);
-        r.metrics.time_ms.extend(wr.metrics.time_ms);
-        r.metrics.memory_bytes.extend(wr.metrics.memory_bytes);
-        r.metrics.io_read_bytes = wr.metrics.io_read_bytes;
-        r.metrics.timing_note = wr.metrics.timing_note;
+        merge_worker(req, &mut r, w);
         progress.report(Stage::Analyze, 1, 1);
     }
     finish_report(req, r, t_all)
+}
+
+/// worker 的結果併進報告（同 C++ 版 `run_analysis` 的處理）。
+fn merge_worker(req: &RunRequest, r: &mut Report, w: WorkerRun<(Vec<u8>, bool)>) {
+    let lim = &req.limits;
+    r.metrics.time_ms.insert("worker_wall".into(), w.wall_ms);
+    r.metrics.memory_bytes.insert("job_peak_commit".into(), Some(Count(w.peak_commit)));
+    r.metrics.memory_bytes.insert("job_commit_limit".into(), Some(Count(lim.job_commit_mib << 20)));
+    r.metrics.io_read_bytes = Some(Count(w.io_read));
+    let all_not_checked = |r: &mut Report, reason: &str| {
+        set_not_checked(&mut r.original, reason);
+        if let Some(o) = r.output.as_mut() {
+            set_not_checked(o, reason);
+        }
+    };
+    let (stdout, overflow) = w.stdout.clone().unwrap_or_default();
+    let parsed: Option<serde_json::Value> = (w.outcome == WorkerOutcome::Exited && !overflow)
+        .then(|| serde_json::from_slice::<serde_json::Value>(&stdout).ok())
+        .flatten()
+        .filter(serde_json::Value::is_object);
+    match &w.outcome {
+        WorkerOutcome::LaunchFailed(m) => {
+            all_not_checked(r, "environment_error");
+            r.add_issue(code::ENVIRONMENT_ERROR, "error", "run", m.clone());
+        }
+        WorkerOutcome::Cancelled => {
+            all_not_checked(r, "cancelled");
+            r.add_issue(code::CANCELLED, "error", "run", "cancelled by user (Ctrl+C / Ctrl+Break)");
+        }
+        WorkerOutcome::Deadline => {
+            all_not_checked(r, "deadline");
+            r.add_issue(
+                code::DEADLINE_EXCEEDED,
+                "error",
+                "run",
+                format!("worker exceeded deadline of {} s (raise with --limits deadline_s=)", lim.deadline_s),
+            );
+        }
+        WorkerOutcome::Exited => match parsed {
+            Some(j) if j.get("worker_error").is_some() => {
+                let we = j.get("worker_error").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+                if we == "resource_limit" {
+                    all_not_checked(r, "resource_limit");
+                    let note = if w.memory_limit_signalled { " (Job memory-limit notification received)" } else { "" };
+                    r.add_issue(
+                        code::RESOURCE_LIMIT,
+                        "error",
+                        "run",
+                        format!("worker allocation failed under Job commit limit {} MiB{note}", lim.job_commit_mib),
+                    );
+                } else {
+                    all_not_checked(r, "worker_error");
+                    let msg = j.get("message").and_then(|v| v.as_str()).map_or(we, str::to_string);
+                    r.add_issue(code::WORKER_CRASHED, "error", "run", format!("worker error: {msg}"));
+                }
+            }
+            Some(j) if w.exit_code == 0 => match serde_json::from_value::<Report>(j) {
+                Ok(wr) => merge_report(r, wr),
+                Err(e) => {
+                    all_not_checked(r, "worker_protocol_error");
+                    r.add_issue(code::WORKER_PROTOCOL_ERROR, "error", "run", e.to_string());
+                }
+            },
+            _ => {
+                all_not_checked(r, "worker_crashed");
+                // 程序崩潰一律不猜測為資源上限（同 C++ 版），即使收到記憶體上限通知
+                let msg = format!(
+                    "worker exit 0x{:08X}{}{}",
+                    w.exit_code,
+                    if overflow { ", result too large" } else { "" },
+                    if w.memory_limit_signalled { ", Job memory-limit notification received" } else { "" }
+                );
+                let c = if overflow { code::WORKER_PROTOCOL_ERROR } else { code::WORKER_CRASHED };
+                r.add_issue(c, "error", "run", msg);
+            }
+        },
+    }
+    if !w.stderr.is_empty() {
+        let n = w.stderr.len().min(2000);
+        r.add_issue("worker_stderr", "info", "run", utf8_sanitize(&w.stderr[..n], true));
+    }
+}
+
+/// 身分欄位（檔名、大小、雜湊）與執行層級資料保留外層的值。
+fn merge_report(r: &mut Report, wr: Report) {
+    let merge = |dst: &mut FileReport, mut src: FileReport| {
+        src.name = std::mem::take(&mut dst.name);
+        src.path = std::mem::take(&mut dst.path);
+        src.size_bytes = dst.size_bytes;
+        src.sha256 = std::mem::take(&mut dst.sha256);
+        *dst = src;
+    };
+    merge(&mut r.original, wr.original);
+    if let (Some(dst), Some(src)) = (r.output.as_mut(), wr.output) {
+        merge(dst, src);
+    }
+    r.codecs = wr.codecs;
+    r.geometry = wr.geometry;
+    r.samples = wr.samples;
+    r.color = wr.color;
+    r.icc = wr.icc;
+    r.metadata = wr.metadata;
+    r.size = wr.size;
+    r.strict = wr.strict;
+    r.issues.extend(wr.issues);
+    r.metrics.time_ms.extend(wr.metrics.time_ms);
+    r.metrics.memory_bytes.extend(wr.metrics.memory_bytes);
+    r.metrics.timing_note = wr.metrics.timing_note;
 }
 
 /// 副檔名檢查、大小補值與退出碼判定。

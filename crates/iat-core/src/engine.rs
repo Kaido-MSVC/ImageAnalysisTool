@@ -6,6 +6,7 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::fs::File;
+use std::panic::{self, AssertUnwindSafe};
 use std::rc::Rc;
 use std::time::Instant;
 
@@ -39,6 +40,8 @@ pub struct AnalysisInput<'a> {
     pub progress: &'a dyn Progress,
     /// 整次執行的期限（deadline_s）
     pub deadline: Instant,
+    /// 已知 rav1d 會 panic 的一側（[original, output]）：不再解碼，判為解碼錯誤（見 `worker`）
+    pub av1_failed: [bool; 2],
 }
 
 /// 引擎的結果：被取消或超過期限時，外層照 C++ 版處理 worker 被終止的情況。
@@ -80,6 +83,8 @@ pub struct SideState<'a> {
     pub scan_ms: f64,
     pub temp: Option<TempFile<'a>>,
     pub quota: Rc<RefCell<TempQuota>>,
+    /// 先前的 worker 在這一側的 AV1 解碼中 panic（rav1d 的 C 介面不能 unwind）
+    pub av1_failed: bool,
 }
 
 /// 一側的解碼器。引擎依序呼叫：open() 一次；每列 read_row() 一次（由上而下），直到失敗或讀完；
@@ -184,6 +189,17 @@ fn jxl_equivalence(a: &FileReport, b: &FileReport) -> Option<(String, String)> {
     None
 }
 
+/// 樣本模型名稱的靜態字串（worker 傳回的檢視標頭用）；不認得的名稱為空字串。
+pub(crate) fn model_name(model: &str) -> &'static str {
+    match model {
+        "gray" => "gray",
+        "gray_alpha" => "gray_alpha",
+        "rgb" => "rgb",
+        "rgba" => "rgba",
+        _ => "",
+    }
+}
+
 pub fn has_alpha(model: &str) -> bool {
     model == "gray_alpha" || model == "rgba"
 }
@@ -258,6 +274,50 @@ impl Side<'_> {
             self.stopped = Some(d);
         }
     }
+
+    /// 解碼器 panic：判為解碼錯誤（同 C++ 版解碼器回報失敗），停用解碼器。
+    fn panicked(&mut self, issues: &mut Vec<Issue>) {
+        let st = &mut self.st;
+        st.failed = true;
+        st.rep.decode_status = if st.rows > 0 { "partial" } else { "failed" }.into();
+        st.rep.decode_status_reason = "decode_error".into();
+        st.rep.coverage.rows_decoded = st.rows;
+        issues.push(Issue::new(code::DECODE_FAILED, "error", st.scope, "decoder panicked"));
+        self.stop();
+    }
+
+    /// 以下三個呼叫都用 catch_unwind 包住：解碼器裡的 panic 不讓整個 worker 結束。
+    fn open(&mut self, issues: &mut Vec<Issue>, lim: &Limits) -> bool {
+        let Some(dec) = self.dec.as_mut() else { return false };
+        let st = &mut self.st;
+        match panic::catch_unwind(AssertUnwindSafe(|| dec.open(st, issues, lim))) {
+            Ok(ok) => ok,
+            Err(_) => {
+                self.panicked(issues);
+                false
+            }
+        }
+    }
+
+    fn read_row(&mut self, issues: &mut Vec<Issue>) -> bool {
+        let Some(dec) = self.dec.as_mut() else { return false };
+        let st = &mut self.st;
+        match panic::catch_unwind(AssertUnwindSafe(|| dec.read_row(st, issues))) {
+            Ok(ok) => ok,
+            Err(_) => {
+                self.panicked(issues);
+                false
+            }
+        }
+    }
+
+    fn finish(&mut self, issues: &mut Vec<Issue>) {
+        let Some(dec) = self.dec.as_mut() else { return };
+        let st = &mut self.st;
+        if panic::catch_unwind(AssertUnwindSafe(|| dec.finish(st, issues))).is_err() {
+            self.panicked(issues);
+        }
+    }
 }
 
 fn new_side<'a>(
@@ -280,6 +340,7 @@ fn new_side<'a>(
             scan_ms: 0.0,
             temp: temp.map(|f| TempFile::new(Some(f))),
             quota: Rc::clone(quota),
+            av1_failed: false,
         },
         dec: None,
         stopped: None,
@@ -353,7 +414,12 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Outcome {
     let quota = Rc::new(RefCell::new(TempQuota::new(lim.temp_gib << 30, input.temp_free_bytes)));
     let mut issues: Vec<Issue> = Vec::new();
     let mut a = new_side("original", input.original, input.temp[0], &quota);
-    let mut b = input.output.map(|i| new_side("output", i, input.temp[1], &quota));
+    a.st.av1_failed = input.av1_failed[0];
+    let mut b = input.output.map(|i| {
+        let mut s = new_side("output", i, input.temp[1], &quota);
+        s.st.av1_failed = input.av1_failed[1];
+        s
+    });
     prepare_side(&mut a, &mut issues, lim);
     if let Some(b) = b.as_mut() {
         prepare_side(b, &mut issues, lim);
@@ -464,8 +530,10 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Outcome {
     }
 
     for s in std::iter::once(&mut a).chain(b.as_mut()) {
-        let Some(dec) = s.dec.as_mut() else { continue };
-        if dec.open(&mut s.st, &mut issues, lim) {
+        if s.dec.is_none() {
+            continue;
+        }
+        if s.open(&mut issues, lim) {
             s.st.canon = vec![0; s.st.width as usize * s.st.layout.channels as usize];
         } else {
             s.stop();
@@ -531,7 +599,8 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Outcome {
     let (mut a_alpha, mut b_alpha): (Option<usize>, Option<usize>) = (None, None);
     if comparable
         && let Some(b) = b.as_mut()
-        && let (Some(dec_a), Some(dec_b)) = (a.dec.as_mut(), b.dec.as_mut())
+        && a.dec.is_some()
+        && b.dec.is_some()
     {
         let wide = if has_alpha(a.st.layout.model) { a.st.layout.model } else { b.st.layout.model };
         names = channel_names(wide);
@@ -550,8 +619,8 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Outcome {
             if let Some(o) = stop(input.cancel) {
                 return o;
             }
-            let ra = dec_a.read_row(&mut a.st, &mut issues);
-            let rb = dec_b.read_row(&mut b.st, &mut issues);
+            let ra = a.read_row(&mut issues);
+            let rb = b.read_row(&mut issues);
             if !ra || !rb {
                 break;
             }
@@ -596,12 +665,14 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Outcome {
     let base = rows_done(&a, b.as_ref());
     let mut done_tail = 0u64;
     for s in std::iter::once(&mut a).chain(b.as_mut()) {
-        let Some(dec) = s.dec.as_mut() else { continue };
+        if s.dec.is_none() {
+            continue;
+        }
         while !s.st.failed && s.st.rows < s.st.height as u64 {
             if let Some(o) = stop(input.cancel) {
                 return o;
             }
-            if !dec.read_row(&mut s.st, &mut issues) {
+            if !s.read_row(&mut issues) {
                 break;
             }
             done_tail += 1;
@@ -609,9 +680,7 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Outcome {
         }
     }
     for s in std::iter::once(&mut a).chain(b.as_mut()) {
-        if let Some(dec) = s.dec.as_mut() {
-            dec.finish(&mut s.st, &mut issues);
-        }
+        s.finish(&mut issues);
     }
     let dec_ms = ms_since(t_dec);
 
@@ -994,14 +1063,13 @@ fn strict_compare(r: &mut Report, not_cmp_reason: &str) {
     r.strict.reasons = reasons;
 }
 
-/// 檢視用的一側解碼結果（樣本依影像順序，未做任何轉換）。
+/// 檢視用的一側解碼結果（樣本交給 [`ViewSink`]，依影像順序，未做任何轉換）。
 pub(crate) struct ViewSamples {
     pub layout: RowLayout,
     pub width: u32,
     pub height: u32,
     /// 成功解出的列數；小於 height 時表示檔案在中途失敗
     pub rows: u32,
-    pub samples: Vec<u16>,
     pub format: String,
     /// 第一個錯誤問題的訊息（解碼失敗或不支援時）
     pub error: Option<String>,
@@ -1019,6 +1087,34 @@ pub(crate) enum ViewStop {
     },
 }
 
+/// 檢視解碼的列接收端：同一個程序裡收進記憶體，或在 worker 裡寫到 stdout。
+pub(crate) trait ViewSink {
+    /// 版面確定、解碼器開始之後，第一列之前呼叫一次。
+    fn begin(&mut self, layout: &RowLayout, width: u32, height: u32) -> Result<(), ViewStop>;
+    /// 依序每列一次。
+    fn row(&mut self, canon: &[u16]) -> Result<(), ViewStop>;
+}
+
+/// 收進記憶體的接收端（先一次預留整張的大小）。
+#[derive(Default)]
+pub(crate) struct VecSink {
+    pub samples: Vec<u16>,
+}
+
+impl ViewSink for VecSink {
+    fn begin(&mut self, layout: &RowLayout, width: u32, height: u32) -> Result<(), ViewStop> {
+        let total = u64::from(width).saturating_mul(u64::from(layout.channels)).saturating_mul(u64::from(height));
+        let bytes = total.saturating_mul(2);
+        let total = usize::try_from(total).map_err(|_| ViewStop::TooLarge(bytes))?;
+        self.samples.try_reserve_exact(total).map_err(|_| ViewStop::TooLarge(bytes))
+    }
+
+    fn row(&mut self, canon: &[u16]) -> Result<(), ViewStop> {
+        self.samples.extend_from_slice(canon);
+        Ok(())
+    }
+}
+
 /// 把一個輸入整張解碼成正規樣本，供 GUI 檢視；格式不支援或中途失敗時仍回傳已解出的部分與錯誤訊息。
 pub(crate) fn decode_view_samples(
     input: &Input<'_>,
@@ -1027,6 +1123,7 @@ pub(crate) fn decode_view_samples(
     lim: &Limits,
     max_pixels: u64,
     cancel: &CancelToken,
+    sink: &mut dyn ViewSink,
 ) -> Result<ViewSamples, ViewStop> {
     let quota = Rc::new(RefCell::new(TempQuota::new(lim.temp_gib << 30, temp_free_bytes)));
     let mut issues = Vec::new();
@@ -1037,43 +1134,41 @@ pub(crate) fn decode_view_samples(
         width: 0,
         height: 0,
         rows: 0,
-        samples: Vec::new(),
         format: s.st.rep.format.clone(),
         error: None,
     };
     let first_error = |issues: &[Issue]| issues.iter().find(|i| i.severity == "error").map(|i| i.message.clone());
-    let Some(dec) = s.dec.as_mut() else {
+    if s.dec.is_none() {
         out.error = first_error(&issues);
         return Ok(out);
-    };
+    }
     // 檢視上限在 open() 之前檢查：open() 會配置解碼緩衝
     if u64::from(s.st.width) * u64::from(s.st.height) > max_pixels {
         return Err(ViewStop::OverViewLimit { width: s.st.width, height: s.st.height });
     }
-    if !dec.open(&mut s.st, &mut issues, lim) {
+    if !s.open(&mut issues, lim) {
         out.error = first_error(&issues).or_else(|| Some("decoder could not start".into()));
         return Ok(out);
     }
     let row_len = s.st.width as usize * s.st.layout.channels as usize;
-    let total = (row_len as u64).saturating_mul(u64::from(s.st.height));
-    let bytes = total.saturating_mul(2);
-    let total = usize::try_from(total).map_err(|_| ViewStop::TooLarge(bytes))?;
-    out.samples.try_reserve_exact(total).map_err(|_| ViewStop::TooLarge(bytes))?;
+    sink.begin(&s.st.layout, s.st.width, s.st.height)?;
+    out.layout = s.st.layout.clone();
+    out.width = s.st.width;
+    out.height = s.st.height;
     s.st.canon = vec![0; row_len];
+    let mut rows = 0u32;
     while !s.st.failed && s.st.rows < u64::from(s.st.height) {
         if cancel.is_cancelled() {
             return Err(ViewStop::Cancelled);
         }
-        if !dec.read_row(&mut s.st, &mut issues) {
+        if !s.read_row(&mut issues) {
             break;
         }
-        out.samples.extend_from_slice(&s.st.canon);
+        sink.row(&s.st.canon)?;
+        rows += 1;
     }
-    dec.finish(&mut s.st, &mut issues);
-    out.layout = s.st.layout.clone();
-    out.width = s.st.width;
-    out.height = s.st.height;
-    out.rows = (out.samples.len() / row_len.max(1)) as u32;
+    s.finish(&mut issues);
+    out.rows = rows;
     if out.rows < out.height || s.st.failed {
         out.error = first_error(&issues).or_else(|| Some("decoding stopped early".into()));
     }

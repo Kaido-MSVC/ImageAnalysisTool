@@ -1,0 +1,19 @@
+[package]
+name = "iat-worker"
+description = "iat-worker.exe: runs the iat analysis inside the parent's Job Object (D-R02)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "iat-worker"
+path = "src/main.rs"
+
+[dependencies]
+iat-core.workspace = true
+
+[lints]
+workspace = true
