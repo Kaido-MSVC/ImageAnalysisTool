@@ -172,6 +172,39 @@ cases += [
 ]
 
 
+# ---- TIFF (stage 4): every TIFF fixture inspected, the C++ run_e2e.py budget / tile temp / libtiff
+# allocation cases, and the Rust-side variants in tests/fixtures/tiff_variants (D-R17).
+VAR = os.path.join(FIX, "..", "tiff_variants")
+TIFFS = sorted(n for n in os.listdir(FIX) if n.endswith(".tif"))
+for n in TIFFS:
+    cases.append(Case("tiffinspect_" + n[:-4], ["inspect", fx(n)]))
+cases.append(Case("tiffinspect_imbc_multipage", ["inspect", os.path.join(FIX, "..", "imbc", "multipage-v12.tiff")]))
+ONE, SHARED = fx("s2_tif_rgb16_one_big_strip.tif"), fx("s2_tif_gray8_147456_shared_tiles.tif")
+TILE, TDIFF, STRIP = (fx("s2_tif_rgb16_4096x300_tile256.tif"), fx("s2_tif_rgb16_4096x300_tile256_diff.tif"),
+                      fx("s2_tif_rgb16_4096x300_strip16_be.tif"))
+cases += [
+    Case("tiff_big_strip_budget", ["compare", ONE, ONE, "--limits", "buffer_mib=8"]),
+    Case("tiff_big_strip_default", ["compare", ONE, ONE]),
+    Case("tiff_tile_temp", ["compare", TILE, STRIP, "--limits", "buffer_mib=8"]),
+    Case("tiff_tile_temp_diff", ["compare", TDIFF, STRIP, "--limits", "buffer_mib=8"]),
+    Case("tiff_tile_band", ["compare", TILE, STRIP]),
+    Case("tiff_libtiff_alloc_limit", ["inspect", SHARED, "--limits", "buffer_mib=1", "metadata_item_mib=1"]),
+    Case("tiff_shared_tiles_default", ["compare", SHARED, SHARED]),
+]
+if os.path.isdir(VAR):
+    v = lambda n: os.path.join(VAR, n)
+    for n in sorted(os.listdir(VAR)):
+        if n.endswith(".tif"):
+            cases.append(Case("tiffvar_" + n[:-4], ["inspect", v(n)]))
+    for a, b in [("v_rgb8_fill2.tif", v("v_rgb8_fill2_expected.tif")),
+                 ("v_gray8a_miniswhite.tif", v("v_gray8a_miniswhite_expected.tif")),
+                 ("v_rgb8_pred2_deflate_be.tif", v("v_rgb8_none_ref.tif")),
+                 ("v_none_short_count.tif", fx("s2_tif_rgb16_le_strip_none.tif")),
+                 ("v_none_short_count_last.tif", fx("s2_tif_rgb16_le_strip_none.tif")),
+                 ("v_deflate_no_adler.tif", fx("s2_tif_rgb16_pred2_le_deflate.tif"))]:
+        cases.append(Case("tiffvar_pair_" + a[:-4], ["compare", v(a), b]))
+
+
 def make_sparse(d):
     p = os.path.join(d, "sparse_16gib.bin")
     open(p, "wb").close()

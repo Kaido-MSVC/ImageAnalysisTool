@@ -15,6 +15,7 @@ py -3.13 -I tests\compare\compare_iat.py `
 - 結果表寫在 `<out>/diff-table.md`。退出碼 0 表示所有「不需解碼」案例，以及 `--accept` 指定格式的「本階段」案例都一致（允許差異算一致）。階段 1 用 `--accept png`；其他格式的案例只列出供參考。
 - Markdown 比對前換回 C++ 版的值時，也會替換經過 Markdown 跳脫的形式（同 core 的 `md_escape`），例如 `BITSTREAM\_ERROR`。
 - 允許差異表的欄位樣式中 `[` 是字面字元，只有 `*`、`?` 是萬用字元；已允許的 JSON 字串差異在 Markdown 比對前會換回 C++ 版的值（D-R08）。
+- TIFF（階段 4，D-R17）：`generated/` 的每張 TIFF 各一個 inspect 案例（`tiffinspect_*`）、C++ 版 `run_e2e.py` 的預算／tile 暫存／libtiff 配置上限案例（`tiff_big_strip_*`、`tiff_tile_*`、`tiff_libtiff_alloc_limit`、`tiff_shared_tiles_default`），以及 `tests/fixtures/tiff_variants/` 的變形檔（`tiffvar_*`，含 6 組配對）。階段 4 用 `--accept png,tiff,bigtiff`。
 - 本機私人樣本：`--local <cases.local.json>`（C++ repo `tools/regress` 的格式，讀 `cases[]` 與 `inspect_all`）、`--pairs <資料夾>`（`gen_pairs.py` 的輸出，加入 `run_cases.py` 的對照組案例）。案例名稱前加 `local_`；樣本唯讀，結果只寫到 `--out`，都不進 git。例如 `--local D:\projects\ImageAnalysisTool\tools\regress\cases.local.json --pairs <pairs> --only ^local_`。
 - `--only <regex>` 只跑名稱符合的案例；`--no-cancel` 跳過需要 16 GiB 稀疏檔的取消案例。
 - 用到硬連結，`--out` 建議放在 NTFS 磁碟上。
