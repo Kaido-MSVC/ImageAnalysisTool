@@ -46,6 +46,10 @@ ap.add_argument("--no-cancel", action="store_true", help="skip the Ctrl+Break du
 ap.add_argument("--accept", default="",
                 help="comma-separated formats of the current stage (e.g. png): cases whose files are all of these "
                      "formats (or need no decoder) must match too")
+ap.add_argument("--local", help="local sample config in the format of the C++ repo's tools/regress/cases.local.json "
+                                "(cases[] and inspect_all); private files, results stay under --out")
+ap.add_argument("--pairs", help="pairs folder written by the C++ repo's tools/regress/gen_pairs.py ({P}); adds the "
+                                "derived pair cases of run_cases.py")
 args = ap.parse_args()
 
 FIX = os.path.abspath(args.fixtures)
@@ -179,6 +183,58 @@ def make_sparse(d):
 
 if not args.no_cancel:
     cases.append(Case("cancel_during_hash", ["compare", "{D}\\sparse_16gib.bin", A], setup=make_sparse, cancel_after=1.0))
+
+
+# ------------------------------------------------------------------ local samples (never in git)
+def imbc_case(name, a, b, extra=()):
+    """IMB-C 1.4 call shape, as in the C++ repo's run_cases.py (reports=False: the JSON path is in argv)."""
+    return Case(name, ["compare", a, b, "--report-json", "{D}\\report.json", "--temp-dir", "{D}",
+                       "--limits", "buffer_mib=64", "--limits", "job_commit_mib=1024", *extra], reports=False)
+
+
+PAIRS = os.path.abspath(args.pairs) if args.pairs else None
+if PAIRS:
+    P = lambda n: os.path.join(PAIRS, n)
+    for o in ["crop8__webp.webp", "crop8__webp-lossy.webp", "crop8__jxl.jxl", "crop8__jxl-lossy.jxl", "crop8__tiff.tif",
+              "crop8__avif.avif", "crop8__avif-lossy.avif", "crop8__psd.psd", "crop8__modified.png",
+              "crop8__png16.png", "crop8__smaller.png"]:
+        cases.append(imbc_case("local_pair_" + o, P("crop8.png"), P(o)))
+    cases.append(imbc_case("local_pair_crop16_vs_crop8", P("crop.png"), P("crop8.png")))
+    cases.append(imbc_case("local_same_file", P("crop8.png"), P("crop8.png")))
+    for n in sorted(os.listdir(PAIRS)):
+        if os.path.isfile(P(n)):
+            cases.append(Case("local_pairs_inspect_" + n, ["inspect", P(n)]))
+if args.local:
+    cfg = json.load(open(args.local, encoding="utf-8"))
+    SAMPLES = cfg.get("samples_dir")
+    roots = {"{S}": SAMPLES, "{P}": PAIRS}
+
+    def expand(tok):
+        for key, root in roots.items():
+            if tok.startswith(key + "/"):
+                if root is None:
+                    sys.exit("local config uses %s but its folder is not given" % key)
+                return os.path.join(root, *tok[len(key) + 1:].split("/"))
+        return tok
+
+    for c in cfg.get("cases", []):
+        a = [expand(t) for t in c["args"]]
+        shape = c.get("shape", "raw")
+        if shape == "full":
+            cases.append(Case("local_" + c["name"], a))
+        elif shape == "imbc":
+            cases.append(imbc_case("local_" + c["name"], a[0], a[1], a[2:]))
+        else:
+            cases.append(Case("local_" + c["name"], a, reports=False))
+    ia = cfg.get("inspect_all")
+    if ia and SAMPLES:
+        exts = tuple(e.lower() for e in ia.get("extensions", []))
+        for n in sorted(os.listdir(SAMPLES)):
+            if n.lower().endswith(exts):
+                cases.append(Case("local_" + ia.get("name_prefix", "sample_inspect_") + n,
+                                  ["inspect", os.path.join(SAMPLES, n), *ia.get("extra_args", [])]))
+if len({c.name for c in cases}) != len(cases):
+    sys.exit("duplicate case names")
 
 if ONLY:
     cases = [c for c in cases if ONLY.search(c.name)]

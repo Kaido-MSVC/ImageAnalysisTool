@@ -187,6 +187,12 @@ C++ 版有些問題代碼來自 libpng 的警告：`metadata_parse_failed`（警
 
 問題訊息的字首是 `libpng-compatible check: `（C++ 版是 `libpng: `），後面的文字相同。這些警告不寫進 `decoder_warnings`，因為它們不是解碼器產生的；兩者都列在允許差異。
 
+**真實樣本驗證（2026-11-21）**：用 C++ repo `tools/regress/cases.local.json` 的樣本資料夾與 `gen_pairs.py` 產生的對照組資料夾（`compare_iat.py --local … --pairs …`），C++ 版與 Rust 版的 PNG 案例全部一致，只有允許的 `decode_path` 差異，沒有缺少的 libpng 警告，所以不補做。樣本與結果都不進 git。
+- 涵蓋的 PNG：9 張（1 張 12000×8637 RGB 8-bit 真實圖，8 張 ImageMagick 輸出的 RGB／RGBA 8-bit，最大 2976×4175），共 15 個 PNG 相關案例（inspect、IMB-C 呼叫方式的 compare、同檔比對）。
+- 這些樣本含有的輔助 chunk：cHRM（值為 sRGB／D65 原色）、bKGD、pHYs、tIME、zTXt、tEXt、iTXt。
+- **仍未經真實樣本驗證**：gAMA、sRGB、iCCP（含已知 sRGB profile）以及 sBIT、cICP、mDCV、cLLI、hIST、sPLT、oFFs、pCAL、sCAL 的內容檢查；樣本裡沒有這些 chunk。遇到含這些 chunk 且 C++ 版有警告的檔案時再補做。
+- 同一輪的 PSD／PSB（9 張 inspect、2 組對 ImageMagick PNG 的 compare）與 WebP 案例也全部一致。
+
 ### D-R13 錯誤處理：不把 I/O 錯誤當成預設值（2026-11-20，錯誤處理審查）
 
 錯誤處理審查列出幾處吞掉錯誤的地方。修正前逐一對照了 C++ 版 1.0.0 在同樣情況下的行為；下列各點 C++ 版同樣吞掉錯誤，所以 Rust 版的修正是**刻意的差異**。C++ 版不動。正常情況下輸出不變，比對腳本原本一致的案例仍然全部一致。
