@@ -39,6 +39,19 @@ C++ 版把解碼放在 `iat-worker.exe`，用 Job Object 套 `job_commit_mib` �
 
 **第二次修訂（2026-11-20，因 D-R10）**：worker 改做成獨立的 bin crate `crates/iat-worker`，產出 `iat-worker.exe`，發布結構和 C++ 版相同（`iat.exe` 與 `iat-worker.exe` 放在同一個資料夾），不做成 `iat.exe` 的隱藏子命令。IMB-C 會檢查 `iat-worker.exe` 是否存在，這樣不用修改 IMB-C。
 
+**第三次修訂（2026-11-21，階段 6，使用者決定）**：**所有格式**的分析都在 `iat-worker.exe` 裡執行（同 C++ 版），GUI 的分析也一樣。
+- 父程序（`iat.exe`、`iat-gui.exe`）照 C++ 版 `run_worker`：唯讀開檔、雜湊、建立暫存檔，再以繼承的 handle 啟動 worker（`PROC_THREAD_ATTRIBUTE_HANDLE_LIST` 只列這些 handle）。worker 先以暫停狀態建立、放進 Job Object 後才開始執行。
+- Job：整個 Job 與單一程序的 commit 上限都是 `job_commit_mib`，只允許一個程序，關閉 Job 時結束 worker，未處理的例外直接結束；記憶體上限通知經 completion port。取消與 `deadline_s` 由父程序結束 Job（結束代碼與 C++ 版相同）。
+- 協定是 Rust 版自己的（`crates/iat-core/src/worker.rs`）：stdout 為報告 JSON 或 `{"worker_error": …}`；另一條管線傳進度，以及「rav1d 在哪一側 panic」。
+- 結果的對應與 C++ 版相同：`environment_error`（找不到 worker、Job 設定或建立程序失敗）、`cancelled`、`deadline_exceeded`（訊息改為 C++ 版的 `worker exceeded deadline of …`）、`resource_limit`（worker 配置失敗）、`worker_crashed`、`worker_protocol_error`（stdout 超過 32 MiB 或報告格式不符）、`worker_stderr`（info）。
+- **配置失敗**：worker 的全域配置器（`win::WorkerAllocator`）在系統配置器失敗時，把事先準備好的固定字串 `{"worker_error":"resource_limit",…}` 直接以 WriteFile 寫到 stdout 後 `ExitProcess(3)`，處理過程不再配置記憶體（使用者決定）。父程序回報 `worker allocation failed under Job commit limit N MiB`。
+- **panic**：引擎用 `catch_unwind` 包住解碼器的 open／read_row／finish，panic 判為該側的 `decode_failed`（`decode_error`），和 C++ 版解碼器回報失敗相同；worker 的 panic hook 不印任何東西（不會多出 `worker_stderr`）。release profile 沒有設 `panic = "abort"`（只有 `lto`、`codegen-units`）。
+  - rav1d 的 `dav1d_*` 是 `extern "C"`，panic 不能 unwind 出來，會直接中止 worker。為了仍判為解碼錯誤：AV1 解碼期間 panic hook 經通道告訴父程序是哪一側，父程序把那一側標記後重跑 worker（每側最多一次），重跑時該側不解碼、直接判為 `decode_error`。
+- 報告經過一次 JSON 往返：serde_json 開 `float_roundtrip`，浮點數原值往返。`metrics` 現在有 `worker_wall`、`job_peak_commit`、`job_commit_limit`（仍不比對，D-R08）。
+- **GUI 的檢視解碼**：AVIF 在 worker 裡解碼（套 GUI 的 `job_commit_mib`），樣本經 stdout 傳回；其他格式留在 GUI 程序裡。評估：其他格式的解碼器都是純 safe 的 Rust，沒有 rav1d 那樣的 unsafe 隔離需求；檢視不產生報告，沒有和 C++ 版一致的要求；改走 worker 會讓整張樣本多經過一次管線複製（16K×8K RGB16 約 800 MB）。
+- **JXL 也走 worker 的評估**（D-R18）：已隨「所有格式」一起走 worker，Job 的 commit 上限因此對 JXL 生效，不會再無上限地配置。但和 C++ 版仍不完全相同：C++ 版的 libjxl 經自己的配置器，超過硬上限（`job_commit_mib` − 64 MiB）時那一側判為 `resource_limit`、報告其餘部分照常產生；Rust 版是整個 worker 在 Job 上限配置失敗，報告為執行層級的 `resource_limit`（退出碼 4 相同，`decode_status` 都是 `not_checked`／`resource_limit`，但沒有各側的其他欄位）。事前預估擋下的情況（大多數）和 C++ 版完全相同。
+- **已知差異**：C++ 版的 libpng 也有同樣的配置器上限。C++ `run_e2e.py` 的 `job_commit_limit`（`s1_wide_rgb16_srgb.png` 自己比自己、`buffer_mib=512 job_commit_mib=24`）：C++ 版是兩側各一個 `libpng: Out of memory`，報告完整；Rust 版是執行層級的 `worker allocation failed under Job commit limit 24 MiB (Job memory-limit notification received)`。退出碼 4、兩側 `not_checked`／`resource_limit` 相同。這個案例不放進比對腳本（差異是整份報告的內容，不是個別欄位）。
+
 ### D-R03 iat-core 的第二個 unsafe 例外：`win` 模組（2026-11-19）
 
 規劃書與 CLAUDE.md 只允許 rav1d 包裝模組使用 unsafe。為了和 C++ 版行為一致，`crates/iat-core/src/win.rs` 也需要 Win32 FFI，std 沒有對應的安全介面：
@@ -57,6 +70,8 @@ C++ 版把解碼放在 `iat-worker.exe`，用 Job Object 套 `job_commit_mib` �
 - `iat-core` 的 `lib.rs` 維持 crate 層級 `#![deny(unsafe_code)]`（workspace lint 之外再明寫一次），只在允許的模組加 `#[allow(unsafe_code)]`；不用 `forbid`，因為 `forbid` 不能在子模組放寬。
 - 每個 unsafe 區塊都附 `// SAFETY:` 註解。
 - 已同步修改 CLAUDE.md 的 unsafe 規則。順帶把 `FILE_ID_INFO` 的初始化改成不需要 unsafe 的寫法，`on_ctrl` 改成安全的 `extern "system" fn`。
+
+**階段 6 增補（2026-11-21）**：worker 需要的 Win32 呼叫也放在 `win.rs`（仍是唯一的模組）：Job Object 與 completion port、`CreateProcessW` 加繼承清單、匿名管線、handle 的繼承旗標、worker 端取得繼承的 handle（先以 `GetHandleInformation` 確認有效）、`SetErrorMode`，以及 worker 的全域配置器（`unsafe impl GlobalAlloc`，只轉給 `System`，失敗時寫固定字串後 `ExitProcess`）。`iat-worker` crate 本身沒有 unsafe（`#[global_allocator]` 只是指定 `win::WorkerAllocator`）。
 
 ### D-R04 階段 0 不建立暫存檔（2026-11-19）
 
@@ -417,7 +432,24 @@ C++ 版的訊息 `image resource 0x<id> name runs past the resource section` 在
 | crop8__avif-lossy.avif 1024×768 | 17.5 ms | 35 ms |
 | 測試圖（29×11） | — | 0.3–0.8 ms |
 
-**待決**（第 2 步回報後由使用者決定）：見回報。
+**使用者的決定（2026-11-21）與實作**：
+1. **不寫 YUV→RGB 矩陣轉換**。規劃書第 45 行「AVIF 色彩轉換：有損：各標準矩陣」是誤寫，以 C++ 1.0.0 為準（這是對規劃書的修訂）。有損與 limited range 照 C++ 版回報 `avif_not_lossless_by_metadata`，不解碼。
+2. **`ispe` 與 AV1 畫格尺寸不同**（libavif 會用 libyuv 縮放）：判為 `decoder_disagrees_with_parse`（`failed`），記為已知差異。alpha 的畫格與它的 `ispe` 不同時也一樣。
+3. **grid**：實作。tile 依 dimg 順序解碼後原樣拼接；libavif 在 NextImage 的檢查（tile 蓋滿畫布、最右／最下一排和畫布重疊、tile 至少 64、色度取樣時寬高為偶數、所有 tile 尺寸／位元深度／layout／range 相同）照做，失敗是 `decode_error`。alpha 可以是自己的 grid，或是每個色彩 tile 各一個 `auxl` alpha（libavif 的假 grid item）。測試圖見 `tests/fixtures/avif_generated/README.md`。
+4. **limited range 的 alpha**：照 libavif `avifLimitedToFullY` 的整數公式轉成全範圍（`avif_side::limited_to_full`，單元測試涵蓋端點、夾值、捨入與單調性）。libavif 的編碼器做不出這種檔案，沒有測試圖。
+5. **容器解析**：`avif_scan` 逐行移植；item／property 的解析（`avif_parse`）照 libavif 1.4.2 `avifParse`／`avifDecoderParse`／`avifDecoderReset` 的 item 路徑重寫：頂層 box（ftyp 先出現、相容 brand、size 0、uuid、重複的 ftyp／meta／moov、找到需要的 box 就停）、meta 的子 box（hdlr、iloc、pitm、idat、iprp／ipco／ipma、iinf／infe、iref、grpl 與唯一性）、各 property 的解析與 essential 規則、ispe 與尺寸上限、primary item、alpha（auxC）、Exif（TIFF 標頭位移檢查）與 XMP、av1C、pixi（strict）、clap（strict 的有效性）、alpha 與色彩的轉換 property 是否一致、nclx 或序列標頭的 CICP（序列標頭解析移植 `obu.c`）。錯誤只分 C++ 版會區分的 `truncated`／`resource_limit`／其他（`structure_error`）。
+
+**rav1d 的錯誤處理**：rav1d 回傳錯誤時是 `decode_failed`／`decode_error`，問題訊息 `rav1d: Decoding of color planes failed`（C++ 版是 `libavif: …`）；`decoder_errors` 另附 rav1d 的錯誤碼。
+
+**已知差異與風險**（同 D-R17，遇到時問題代碼可能和 C++ 版不同；目前的測試圖、私人樣本都沒有觸發）：
+- 主要 brand 為 `avis` 的影像序列：libavif 走 tracks（解析 moov），這裡不解析，直接回報 `animation_not_supported`，`avif.*`、寬高等欄位是空的；moov 本身損壞時 C++ 版會是 `structure_error`。
+- gain map（`tmap` brand）與 sample transform（`sato`）：libavif 解析時的檢查沒有重做。
+- `a1op`（運算點）、`a1lx`／`lsel`（分層影像）：只做 libavif 的解析檢查；解碼一律用運算點 0、所有圖層（libavif 依 `a1op`／`lsel` 選）。
+- 解碼後的位元深度或 layout 和 av1C 不同：判為 `decoder_disagrees_with_parse`（C++ 版會用解碼後的值讀平面）。
+- grid tile 之間 CICP 不同：rav1d 沒有交出每個 tile 的 CICP，這項檢查沒做。
+- rav1d 的 panic：見 D-R02 第三次修訂。若是 rav1d 的記憶體錯誤（不是 panic）讓 worker 中止，判為 `worker_crashed`。
+
+**驗證**：比對腳本的 AVIF 案例（`pairs.json` 的 16 組與 3 個 inspect，含 `avif_job_limit_*` 與 AVIF 對 JXL；grid 的 4 個；私人樣本 4 個）全部和 C++ 版一致，只有允許的 `decode_path`（`rav1d-planes-identity+temp` 對 `libavif-aom-planes-identity+temp`）。GUI：比對、結果與影像檢視（grid 的 RGBA 與 1024×768 私人樣本）都實測過，開檔對話方塊加上 AVIF。
 
 新增的直接依賴：rav1d 1.1.0（BSD-2-Clause），見 dependencies.md。
 
@@ -427,7 +459,7 @@ C++ 版的訊息 `image resource 0x<id> name runs past the resource section` 在
 
 | 案例 | 欄位 | 原因 |
 |---|---|---|
-| * | *.decode_path | 解碼器名稱：Rust 版是 png crate（`png-rows-no-transform`、`png-adam7-passes-no-transform+temp`），C++ 版是 libpng（D-R11） |
+| * | *.decode_path | 解碼器名稱：Rust 版是 png crate（`png-rows-no-transform`、`png-adam7-passes-no-transform+temp`），C++ 版是 libpng（D-R11）；AVIF 是 `rav1d-planes-*` 對 `libavif-aom-planes-*`（D-R19）；其他格式同理 |
 | truncated_output | issues[*].message | 解碼失敗訊息字首 `png decoder` 對 `libpng`，其餘文字相同（D-R11） |
 | crc_error_output | issues[*].message | 同上 |
 | missing_iend_output | issues[*].message | 同上 |

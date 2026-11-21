@@ -18,7 +18,7 @@
 | crate | 宣告 | Cargo.lock | 授權 | 用途 |
 |---|---|---|---|---|
 | serde（derive） | 1.0.229 | 1.0.229 | MIT OR Apache-2.0 | 報告模型序列化 |
-| serde_json | 1.0.154 | 1.0.154 | MIT OR Apache-2.0 | JSON 報告（鍵排序靠預設的 BTreeMap，不開 `preserve_order`） |
+| serde_json | 1.0.154（feature `float_roundtrip`） | 1.0.154 | MIT OR Apache-2.0 | JSON 報告（鍵排序靠預設的 BTreeMap，不開 `preserve_order`）。階段 6 起報告從 worker 經過一次 JSON 往返，開 `float_roundtrip` 讓浮點數原值往返（D-R02） |
 | sha2 | 0.11.1 | 0.11.1 | MIT OR Apache-2.0 | 輸入檔 SHA-256 |
 | windows-sys | 0.61.2 | 0.61.2 | MIT OR Apache-2.0 | Win32 繫結，只在 `iat-core/src/win.rs` 使用（D-R03） |
 | png | 0.18.1 | 0.18.1 | MIT OR Apache-2.0 | 階段 1：PNG 的 IDAT 解壓、反濾波與 Adam7 列順序，`Transformations::IDENTITY`（D-R11） |
@@ -29,7 +29,7 @@
 | weezl | 0.1.12 | 0.1.12 | MIT OR Apache-2.0 | 階段 4：TIFF 的 LZW 解壓（TIFF 早換碼寬、輸出滿了就停；舊式碼用 LSB 順序），照 libtiff 的行為包裝（D-R17） |
 | rav1d | 1.1.0（`default-features = false`，feature `bitdepth_8`、`bitdepth_16`） | 1.1.0 | BSD-2-Clause | 階段 6：AV1 解碼，只經 `crates/iat-av1` 的安全包裝使用；不編入組合語言（不開 `asm`），日誌關閉（D-R09、D-R19） |
 
-windows-sys 啟用的 feature：`Win32_Foundation`、`Win32_Globalization`、`Win32_Storage_FileSystem`、`Win32_System_Console`、`Win32_System_Diagnostics_Debug`、`Win32_Security_Cryptography`。
+windows-sys 啟用的 feature：`Win32_Foundation`、`Win32_Globalization`、`Win32_Storage_FileSystem`、`Win32_System_Console`、`Win32_System_Diagnostics_Debug`、`Win32_Security_Cryptography`；階段 6 為了 worker 加上 `Win32_Security`、`Win32_System_IO`、`Win32_System_JobObjects`、`Win32_System_Pipes`、`Win32_System_Threading`（D-R02 第三次修訂，D-R03 階段 6 增補）。沒有新增 crate。
 
 ## 間接依賴（Cargo.lock）
 
@@ -74,8 +74,9 @@ GUI 帶入約 290 個間接依賴（全部是純 Rust，沒有 C/C++ 預建檔�
 階段 6（2026-11-21，rav1d 1.1.0 帶入）：assert_matches 1.5.0、atomig 0.4.3、atomig-macro 0.4.0、paste 1.0.15、parking_lot 0.12.5（MIT OR Apache-2.0）、raw-cpuid 11.6.0、strum 0.26.3、strum_macros 0.26.4（MIT）、to_method 1.1.0（CC0-1.0）、zerocopy 0.7.35、zerocopy-derive 0.7.35（BSD-2-Clause OR Apache-2.0 OR MIT）；建置時另有 nasm-rs 0.3.2 與 cc（不開 `asm` 時 build.rs 不呼叫它們，不需要 NASM 或 C 編譯器）。strum、zerocopy 和 Slint 用的 0.28／0.8 各成兩版，屬於預期內的多版本警告。
 - advisories：忽略 RUSTSEC-2024-0436（paste 不再維護，不是漏洞）。paste 是 rav1d 的 proc-macro，只在編譯時執行，rav1d 1.1.0 沒有不依賴它的版本。
 - `cargo deny check` 通過。
+- workspace 新增兩個自己的 crate：`iat-av1`（rav1d 的安全包裝，unsafe 只在這裡與 `iat-core/src/win.rs`）與 `iat-worker`（bin，產出 `iat-worker.exe`，只依賴 `iat-core`）。release 版 `iat-worker.exe` 同樣只匯入系統 DLL（KERNEL32、ntdll、bcryptprimitives、api-ms-win-core-synch），沒有 VC++ 或 UCRT 執行階段 DLL。
 
-**libavif 1.4.2 + aom 3.15.2 只用於驗證，不是依賴**：`tools/libavif_gen/` 的 C++ 程式連結 C++ 版建置裡的靜態庫（唯讀），傾印 libavif 解出的平面給 rav1d 對照，另有一支只供量測用的編碼程式（D-R19）。
+**libavif 1.4.2 + aom 3.15.2 只用於驗證，不是依賴**：`tools/libavif_gen/` 的 C++ 程式連結 C++ 版建置裡的靜態庫（唯讀），傾印 libavif 解出的平面給 rav1d 對照、產生 `tests/fixtures/avif_generated/` 的 grid 測試圖，另有一支只供量測用的編碼程式（D-R19）。
 
 ## 尚未加入（規劃書已選定）
 

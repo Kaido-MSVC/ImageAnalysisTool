@@ -17,6 +17,7 @@ py -3.13 -I tests\compare\compare_iat.py `
 - 允許差異表的欄位樣式中 `[` 是字面字元，只有 `*`、`?` 是萬用字元；已允許的 JSON 字串差異在 Markdown 比對前會換回 C++ 版的值（D-R08）。
 - TIFF（階段 4，D-R17）：`generated/` 的每張 TIFF 各一個 inspect 案例（`tiffinspect_*`）、C++ 版 `run_e2e.py` 的預算／tile 暫存／libtiff 配置上限案例（`tiff_big_strip_*`、`tiff_tile_*`、`tiff_libtiff_alloc_limit`、`tiff_shared_tiles_default`），以及 `tests/fixtures/tiff_variants/` 的變形檔（`tiffvar_*`，含 6 組配對）。階段 4 用 `--accept png,tiff,bigtiff`。
 - JPEG XL（階段 5，D-R18）：`pairs.json` 的 JXL、`imbc_*`、`mixed_*` 案例，加上 `tests/fixtures/jxl_generated/` 的非 XYB 有損圖（`jxlgen_*`）。階段 5 用 `--accept png,webp,jxl_codestream,jxl_container`。
+- AVIF（階段 6，D-R19）：`pairs.json` 的 AVIF 案例（含 `avif_job_limit_*` 與 AVIF 對 JXL），加上 `tests/fixtures/avif_generated/` 的 grid 測試圖（`avifgen_*`）。階段 6 用 `--accept png,webp,psd,psb,tiff,bigtiff,jxl_codestream,jxl_container,avif`。分析在 `iat-worker.exe` 裡執行，Rust 版的 `iat.exe` 旁邊要有它（`cargo build --release` 會一起產生）。
 - 允許差異表的欄位若寫成 `issues[code=X]`，比對前只略過 C++ 版中代碼為 X 的問題（JSON 與 Markdown 的那一列），其他問題照常逐項比對；用於 Rust 版暫時無法產生的問題（D-R18 的 `layered_image`）。
 - 已允許的數值差異（例如有損解碼的 mae／rmse）也會換回 Markdown，浮點數用 6 位有效數字（同 C++ 版的輸出）。
 - 本機私人樣本：`--local <cases.local.json>`（C++ repo `tools/regress` 的格式，讀 `cases[]` 與 `inspect_all`）、`--pairs <資料夾>`（`gen_pairs.py` 的輸出，加入 `run_cases.py` 的對照組案例）。案例名稱前加 `local_`；樣本唯讀，結果只寫到 `--out`，都不進 git。例如 `--local D:\projects\ImageAnalysisTool\tools\regress\cases.local.json --pairs <pairs> --only ^local_`。

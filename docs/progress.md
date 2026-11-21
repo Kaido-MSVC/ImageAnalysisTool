@@ -4,7 +4,7 @@ Nov 21, 2026 · @YU SIANG CHEN
 
 ## 總覽
 
-八個階段完成了前六個（階段 0 到 5）。比對腳本中已涵蓋的 310 個案例全部和 C++ 版 1.0.0 一致；允許的差異除了訊息文字，只有 JXL 的兩項（暫時缺少的 `layered_image` 與一張非 XYB 有損圖的誤差統計，見 D-R18）。下一步是階段 6（AVIF 與 worker）。
+八個階段完成了前七個（階段 0 到 6）。比對腳本中已涵蓋的 333 個案例全部和 C++ 版 1.0.0 一致；允許的差異除了訊息文字與解碼器名稱，只有 JXL 的兩項（暫時缺少的 `layered_image` 與一張非 XYB 有損圖的誤差統計，見 D-R18）。分析從階段 6 起和 C++ 版一樣在 `iat-worker.exe` 裡執行。下一步是階段 7（收尾）。
 
 | 階段 | 內容 | 狀態 | 比對結果 |
 | --- | --- | --- | --- |
@@ -14,10 +14,10 @@ Nov 21, 2026 · @YU SIANG CHEN
 | 3 | WebP、PSD/PSB | 完成 | WebP 24/24、PSD/PSB 25/25 |
 | 4 | TIFF | 完成 | 134/134 |
 | 5 | JXL | 完成 | 43/43 |
-| 6 | AVIF（rav1d）與 worker | 尚未開始 | — |
+| 6 | AVIF（rav1d）與 worker | 完成 | AVIF 23/23，原有 310 個維持一致 |
 | 7 | 收尾：封包、圖示、版本 2.0.0、IMB-C 實測 | 尚未開始 | — |
 
-階段 1、3、4、5 的 278 個格式案例中，問題代碼、`decode_status`、`rows_decoded`、色彩與 metadata 判定都和 C++ 版相同。
+階段 1、3、4、5、6 的 301 個格式案例中，問題代碼、`decode_status`、`rows_decoded`、色彩與 metadata 判定都和 C++ 版相同。
 
 ## 各階段成果
 
@@ -77,9 +77,25 @@ Nov 21, 2026 · @YU SIANG CHEN
 - jxl-rs 沒有公開的 extra channel 位元深度，自己解析 ImageMetadata（讀到色彩空間為止），對所有 JXL 測試圖和 jxl-rs 交叉核對。
 - jxl-rs 0.8.0 沒有實作 `coalescing = false`，無法得知圖層數：`jxl_two_layers_vs_composite_png` 的 `layered_image`（info）暫列允許差異，給上游的修改提案草稿在 `docs/jxl-rs-upstream-proposal.md`，等你決定是否提交。
 - 非 XYB 的有損測試圖用 libjxl 0.12.0 產生：C++ 版會解碼；jxl-rs 的樣本有少量最低位元差異，判定、不同的像素數與最大誤差相同，只有 mae／rmse 與一個差異樣本值不同（只對這個案例允許）。
-- 配置上限：jxl-rs 沒有分配器掛鉤，只做事前預估（C++ 公式），記為已知差異；階段 6 評估讓 JXL 也走 worker。
+- 配置上限：jxl-rs 沒有分配器掛鉤，只做事前預估（C++ 公式）；階段 6 起 JXL 也在 worker 裡，Job 的 commit 上限對它生效，超過時的報告形式見「已知風險」（D-R02）。
 - 比對腳本新增 `issues[code=X]` 的允許方式（只略過 C++ 版的那一筆問題），允許的數值差異也換回 Markdown。
 - 私人樣本的 4 個 JXL 案例（IMB-C 的無損與有損）一致；GUI 能開 JXL（比對、結果與影像檢視都實測過），開檔對話方塊加上 JXL。
+
+**階段 6：AVIF 與 worker**（提交 7d31490 起）
+
+- **驗證**（第 2 步）：rav1d 1.1.0（不開 asm）解出的 Y／U／V／A 平面，和 C++ 建置裡的 libavif 1.4.2 + aom 逐值相同：測試圖 13 張、私人樣本 2 張、12000×8637 大圖無損與有損各 1 張。C++ 版從不做 YUV→RGB（只讀 identity 4:4:4 與 4:0:0 的平面），所以不寫矩陣轉換（規劃書第 45 行的修訂，D-R19）。
+- **速度**（單執行緒、不開 asm）：12000×8637 無損 13.0 s（C++ 的 aom 15.4–15.8 s）；有損 4:2:0 5.9 s（aom 2.2–2.6 s，但 C++ 版不解有損）。維持不開 asm。
+- **`crates/iat-av1`**：rav1d 的 `dav1d_*` 安全包裝，unsafe 只在 `src/dav1d.rs`，每段附 `// SAFETY:`；關掉 rav1d 預設寫到 stderr 的日誌。
+- **worker**（D-R02 第三次修訂）：獨立的 `iat-worker` bin crate；**所有格式**的分析（CLI 與 GUI）都在 worker 裡，放進套了 `job_commit_mib` 的 Job Object。Win32 部分在 `iat-core/src/win.rs`。
+  - 配置失敗：worker 的全域配置器把固定字串 `worker_error: resource_limit` 直接寫到 stdout 後結束，不再配置記憶體。
+  - 解碼器 panic：`catch_unwind` 判為 `decode_error`，panic 訊息不輸出。rav1d 的 C 介面不能 unwind，改由通道告訴父程序是哪一側，父程序重跑一次、把那一側判為解碼錯誤。
+  - GUI 的影像檢視：AVIF 在 worker 裡解碼，其他格式留在 GUI 程序（評估見 D-R02）。
+- **AVIF 移植**：`avif_scan` 逐行移植；item／property 解析照 libavif 1.4.2 重寫（`avif_parse`，含 strict 的 pixi、clap、alpha ispe 檢查與序列標頭的 CICP）；`avif_side` 照 C++ 版判定。grid（含 alpha grid 與每個 tile 各一個 alpha）、limited range 的 alpha（libavif 的整數公式）都已實作；`ispe` 與畫格尺寸不同時判為 `decoder_disagrees_with_parse`（使用者決定）。
+- **測試圖**：`tests/fixtures/avif_generated/` 的 grid（RGB、RGBA），由 `tools/libavif_gen/gen_avif_grid.cpp` 連結 C++ 建置的 libavif 產生，重產逐位元組相同，C++ 1.0.0 的結果記在該資料夾的 README。
+- **比對**：`pairs.json` 的 AVIF 19 個（含 `avif_job_limit_*` 與 AVIF 對 JXL）、grid 4 個全部一致，只有允許的 `decode_path`；私人樣本的 AVIF 4 個也一致。原本的 310 個案例改走 worker 後仍全部一致；連同 `--local`／`--pairs` 的私人樣本共 377 個案例全部一致（2026-11-21）。
+- **GUI**：比對、結果與影像檢視（grid RGBA、1024×768 私人樣本）都實測過；開檔對話方塊加上 AVIF。
+- **發布結構**：`cargo build --release` 在同一個資料夾產出 `iat.exe`、`iat-worker.exe`（與 `iat-gui.exe`），都只匯入系統 DLL。
+- **依賴**：rav1d 1.1.0（BSD-2-Clause）；`paste`（rav1d 的 proc-macro）的「不再維護」通知加進 deny.toml 的忽略清單；windows-sys 多開 5 個 feature、serde_json 開 `float_roundtrip`。`cargo deny check` 通過。
 
 ## 重要決策
 
@@ -87,7 +103,7 @@ Nov 21, 2026 · @YU SIANG CHEN
 
 | 編號 | 決策 |
 | --- | --- |
-| D-R02 | 目前單一程序；階段 6 恢復 worker，做成獨立的 `iat-worker.exe`（不是隱藏子命令），至少 AVIF 走 worker |
+| D-R02 | 所有格式的分析都在獨立的 `iat-worker.exe` 裡執行（Job Object 套 `job_commit_mib`）；配置失敗回報 `resource_limit`、解碼器 panic 判為解碼錯誤；GUI 的 AVIF 檢視也走 worker |
 | D-R03 | iat-core 的 unsafe 只允許在 `win.rs` 和之後的 AV1 包裝，每段附 `// SAFETY:` 註解 |
 | D-R10 | IMB-C 會檢查版本號（≥ 0.5.1）和 `iat-worker.exe` 是否存在；階段 7 改為 2.0.0，IMB-C 維持不改 |
 | D-R11 | PNG：`png` crate 只解影像列，Adler-32 由 `png_scan` 另外完整驗證 |
@@ -98,8 +114,9 @@ Nov 21, 2026 · @YU SIANG CHEN
 | D-R16 | PSD/PSB：照 C++ 1.0.0 範圍；ZIP、CMYK、32-bit 延到 2.0.0 當成新功能 |
 | D-R17 | TIFF：不用 tiff crate，自己讀 strip／tile 並照 libtiff 4.7.2 的行為；libtiff 讀目錄時的部分警告沒有重做，列為已知風險 |
 | D-R18 | JXL：jxl-rs 解碼、libjxl 的 ICC 查表、自己解析 ImageMetadata；圖層數、配置上限與自訂色彩列舉值的 ICC 是已知差異 |
+| D-R19 | AVIF：rav1d 解碼、平面直接讀取、不做 YUV→RGB；libavif 行為的 item 解析；grid 與 limited range alpha 照 libavif；`ispe` 與畫格不符判為 `decoder_disagrees_with_parse` |
 
-**AV1 的方向（階段 6 適用）**：rav1d 1.1.0 關掉 `asm`，只開 `bitdepth_8`、`bitdepth_16`；包裝層獨立成 `crates/iat-av1`。rav1d 內部有大量 unsafe，所以放進 worker 隔離。本機有 NASM 3.02，只在實測太慢時才開 asm。
+**AV1**：rav1d 1.1.0 關掉 `asm`，只開 `bitdepth_8`、`bitdepth_16`；包裝層獨立成 `crates/iat-av1`。rav1d 內部有大量 unsafe，放進 worker 隔離。實測速度可以接受，不開 asm。
 
 ## 順帶發現的 C++ 版問題
 
@@ -117,7 +134,7 @@ Nov 21, 2026 · @YU SIANG CHEN
 
 ## 待辦與下一步
 
-下一步是階段 6（AVIF 與 worker）；恢復 worker 時一併評估 JXL 是否也走 worker（D-R18）。
+下一步是階段 7（收尾：封包、圖示、版本 2.0.0、IMB-C 實測）。
 
 **已完成的小項目**（2026-11-21）
 
@@ -129,11 +146,13 @@ Nov 21, 2026 · @YU SIANG CHEN
 
 - TIFF：libtiff 讀目錄時的部分警告（tag 的 count／型別不正確而略過等）沒有重做，遇到時問題代碼會和 C++ 版不同（D-R17）。
 - PNG：gAMA、sRGB、iCCP 的 libpng 內容檢查仍未經真實樣本驗證（D-R12）。
-- JXL：多圖層的靜止影像不產生 `layered_image`；libjxl 配置超過硬上限的情況不會判為 `resource_limit`；自訂色彩列舉值沒有 ICC（D-R18）。
+- JXL：多圖層的靜止影像不產生 `layered_image`；自訂色彩列舉值沒有 ICC（D-R18）。
+- 配置上限：C++ 版的 libpng、libjxl 各有自己的配置器上限（`job_commit_mib` − 64 MiB），超過時那一側判為 `resource_limit`、報告其餘部分照常。Rust 版是 worker 在 Job 上限配置失敗，回報執行層級的 `resource_limit`：退出碼與 `decode_status` 相同，但報告少了各側的其他欄位（例如 C++ `run_e2e.py` 的 `job_commit_limit`，D-R02）。事前預估擋下的情況和 C++ 版完全相同。
+- AVIF：主要 brand 為 `avis` 的影像序列不解析（直接回報不支援）；gain map、sample transform、`a1op`／`lsel` 的 libavif 檢查沒有全部重做；`ispe` 與畫格尺寸不同時判為 `decoder_disagrees_with_parse`（D-R19）。
+- rav1d 的記憶體錯誤（不是 panic）讓 worker 中止時，判為 `worker_crashed`（C++ 版是 `decode_error`）。
 
 **留到後面階段**
 
-- [ ] 階段 6：恢復 `iat-worker.exe`，AVIF 走 worker
 - [ ] 階段 7：版本改為 2.0.0、設計程式圖示（C++ 版沒有圖示，要重新設計）、IMB-C 不改程式實測換用
 - [ ] GUI：記住介面語言的設定
 - [ ] 在 C++ repo 開 issue，記下上一節的問題
