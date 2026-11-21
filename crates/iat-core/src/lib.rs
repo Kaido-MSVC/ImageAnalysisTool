@@ -14,6 +14,7 @@ pub mod input;
 pub mod jxl_header;
 pub mod jxl_icc;
 pub mod jxl_scan;
+pub mod jxl_side;
 pub mod limits;
 pub mod markdown;
 pub mod paths;

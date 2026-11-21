@@ -110,6 +110,80 @@ pub fn temp_failure(s: &mut SideState<'_>, issues: &mut Vec<Issue>, e: &TempErro
     }
 }
 
+/// JXL 色彩列舉值的 `key=value` 欄位（C++ 版 `enum_fields`）。
+fn enum_fields(key: &str) -> BTreeMap<&str, &str> {
+    let rest = key.split_once(':').map_or("", |(_, r)| r);
+    rest.split(';').filter_map(|kv| kv.split_once('=')).collect()
+}
+
+/// 訊號清單裡 `marker` 後面的整數（C++ 版 `signal_int`，atoi 語意）。
+fn signal_int(signals: &[String], marker: &str) -> i64 {
+    for s in signals {
+        if let Some(p) = s.find(marker) {
+            let digits: String = s[p + marker.len()..].chars().take_while(char::is_ascii_digit).collect();
+            return digits.parse().unwrap_or(0);
+        }
+    }
+    -1
+}
+
+/// JXL 色彩列舉值和另一側的等價規則（D12，移植 C++ 版 `jxl_equivalence`）：
+/// 相等時回傳 (依據, 附註)。JXL 的列舉值在這裡接受的範圍內等於 CICP 代碼：原色 sRGB=1、BT.2100=9；
+/// 轉換函數 BT.709=1、linear=8、sRGB=13、PQ=16、HLG=18；白點 D65=1。
+fn jxl_equivalence(a: &FileReport, b: &FileReport) -> Option<(String, String)> {
+    let (j, o) = if a.color.kind == "jxl_enum" {
+        (a, b)
+    } else if b.color.kind == "jxl_enum" {
+        (b, a)
+    } else {
+        return None;
+    };
+    if o.color.kind == "jxl_enum" {
+        return None; // 兩個 JXL 列舉值：照一般的 key 比較
+    }
+    // libjxl 產生的 ICC 和另一側內嵌的 ICC 逐位元組相同（使用者決定，D12）
+    if o.color.kind == "icc"
+        && o.icc.status == "embedded"
+        && j.icc.status == "synthesized"
+        && !j.icc.sha256.is_empty()
+        && j.icc.sha256 == o.icc.sha256
+    {
+        return Some((
+            format!(
+                "JXL colour enum whose ICC ({}) is byte-identical to the other file's embedded ICC (sha256 {})",
+                j.icc.profile_name,
+                short_hash(&o.icc.sha256)
+            ),
+            String::new(),
+        ));
+    }
+    let f = enum_fields(&j.color.key);
+    let num = |k: &str| -> i64 { f.get(k).and_then(|v| v.parse().ok()).unwrap_or(0) };
+    let (space, white, prim, tf) = (num("space"), num("white"), num("primaries"), num("transfer"));
+    if (space != 0 && space != 1) || white != 1 {
+        return None;
+    }
+    if o.color.kind == "srgb" && (space == 1 || prim == 1) && tf == 13 {
+        let ji = signal_int(&j.color.signals, "intent=");
+        let pi = signal_int(&o.color.signals, "sRGB(intent ");
+        let note = if ji >= 0 && pi >= 0 && ji != pi {
+            format!(
+                "rendering intent differs: JXL enum {ji}, PNG sRGB {pi} (recorded only; does not affect colour equality)"
+            )
+        } else {
+            String::new()
+        };
+        return Some(("JXL sRGB colour enum and PNG sRGB chunk".into(), note));
+    }
+    if o.color.kind == "cicp" && space == 0 && (prim == 1 || prim == 9) && [1, 8, 13, 16, 18].contains(&tf) {
+        let want = format!("cicp:{prim}/{tf}/0/1");
+        if o.color.key == want {
+            return Some((format!("JXL colour enum equals PNG cICP {}", &want[5..]), String::new()));
+        }
+    }
+    None
+}
+
 pub fn has_alpha(model: &str) -> bool {
     model == "gray_alpha" || model == "rgba"
 }
@@ -214,7 +288,7 @@ fn new_side<'a>(
 
 /// 這個版本有前端（掃描與解碼器）的格式。
 pub(crate) fn has_frontend(format: &str) -> bool {
-    matches!(format, "png" | "webp" | "psd" | "psb" | "tiff" | "bigtiff")
+    matches!(format, "png" | "webp" | "psd" | "psb" | "tiff" | "bigtiff" | "jxl_codestream" | "jxl_container")
 }
 
 fn prepare_side<'a>(s: &mut Side<'a>, issues: &mut Vec<Issue>, lim: &Limits) {
@@ -229,6 +303,8 @@ fn prepare_side<'a>(s: &mut Side<'a>, issues: &mut Vec<Issue>, lim: &Limits) {
         s.dec = crate::psd_side::prepare_psd(st, issues, lim);
     } else if st.rep.format == "tiff" || st.rep.format == "bigtiff" {
         s.dec = crate::tiff_side::prepare_tiff(st, issues, lim);
+    } else if st.rep.format == "jxl_codestream" || st.rep.format == "jxl_container" {
+        s.dec = crate::jxl_side::prepare_jxl(st, issues, lim);
     } else {
         let t0 = Instant::now();
         st.rep.container_status = "unverified".into();
@@ -272,6 +348,7 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Outcome {
     r.codecs.insert(crate::png_side::DECODER_NAME.into(), crate::png_side::DECODER_VERSION.into());
     r.codecs.insert(crate::webp_side::DECODER_NAME.into(), crate::webp_side::DECODER_VERSION.into());
     r.codecs.insert(crate::tiff_side::DECODER_NAME.into(), crate::tiff_side::DECODER_VERSION.into());
+    r.codecs.insert(crate::jxl_side::DECODER_NAME.into(), crate::jxl_side::DECODER_VERSION.into());
 
     let quota = Rc::new(RefCell::new(TempQuota::new(lim.temp_gib << 30, input.temp_free_bytes)));
     let mut issues: Vec<Issue> = Vec::new();
@@ -655,9 +732,14 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Outcome {
         // ---- 色彩（D4、D12）與 ICC（D2）
         let (ca, cb) = (&oa.color, &ob.color);
         let mut pair_issue = |c: &str, sev: &str, m: String| issues.push(Issue::new(c, sev, "pair", m));
-        // JXL 色彩 enum 的等價規則（jxl_equivalence）：階段 5 加入。
+        let je = jxl_equivalence(oa, ob);
         if ca.kind.is_empty() || cb.kind.is_empty() {
             r.color = PairStatus::new("unknown", "colour information not available (decoder did not start)");
+        } else if let Some((basis, note)) = je {
+            r.color = PairStatus::new("equal", basis);
+            if !note.is_empty() {
+                pair_issue("rendering_intent_differs", "info", note);
+            }
         } else if (ca.kind == "icc" && cb.kind == "webp_default_srgb")
             || (ca.kind == "webp_default_srgb" && cb.kind == "icc")
         {
