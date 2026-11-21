@@ -25,6 +25,7 @@
 | miniz_oxide | 0.8.9 | 0.8.9 | MIT OR Zlib OR Apache-2.0 | 階段 1：iCCP／zTXt／iTXt 解壓與 IDAT 串流檢查（區分 Adler-32、損壞、截斷）；與 png 用的是同一版 |
 | crc32fast | 1.5.5 | 1.5.5 | MIT OR Apache-2.0 | 階段 1：PNG chunk CRC（png 也使用） |
 | image-webp | 0.2.4 | 0.2.4 | MIT OR Apache-2.0 | 階段 3：WebP 的 VP8L 解碼；只交 VP8L chunk 的內容（D-R15） |
+| weezl | 0.1.12 | 0.1.12 | MIT OR Apache-2.0 | 階段 4：TIFF 的 LZW 解壓（TIFF 早換碼寬、輸出滿了就停；舊式碼用 LSB 順序），照 libtiff 的行為包裝（D-R17） |
 
 windows-sys 啟用的 feature：`Win32_Foundation`、`Win32_Globalization`、`Win32_Storage_FileSystem`、`Win32_System_Console`、`Win32_System_Diagnostics_Debug`、`Win32_Security_Cryptography`。
 
@@ -35,6 +36,8 @@ block-buffer 0.12.1、cfg-if 1.0.5、const-oid 0.10.3、cpufeatures 0.3.1、cryp
 階段 1 新增（2026-11-20，png 0.18.1 帶入）：adler2 2.0.1（0BSD OR MIT OR Apache-2.0）、bitflags 2.13.2、fdeflate 0.3.7、flate2 1.1.11（MIT OR Apache-2.0）、miniz_oxide 0.9.1（經 flate2）、simd-adler32 0.3.10（MIT）。Cargo.lock 裡的 zlib-rs 是 flate2 的選用功能，沒有啟用、不會編譯。
 
 階段 3 新增（2026-11-20，image-webp 0.2.4 帶入）：byteorder-lite 0.1.0（Unlicense OR MIT）、quick-error 2.0.1（MIT OR Apache-2.0）。
+
+階段 4（2026-11-21）：weezl 0.1.12 只用預設 feature（`std`），沒有其他依賴；它原本就在 Cargo.lock 裡（Slint 經 resvg → gif 帶入），iat-core 與 iat-cli 因此多了這一個 crate，Cargo.lock 沒有新增項目。TIFF 的 Deflate 沿用 miniz_oxide 0.8.9。驗證時用過的 tiff crate 0.11.3 沒有加入（D-R17）。`cargo deny check` 通過。
 
 `cargo deny check`（advisories、bans、licenses、sources）全部通過。唯一的警告是 miniz_oxide 有兩個版本（png 直接用 0.8.9，png 依賴的 flate2 用 0.9.1），不改 png 就無法消除，屬於預期內。
 
@@ -64,4 +67,4 @@ GUI 帶入約 290 個間接依賴（全部是純 Rust，沒有 C/C++ 預建檔�
 
 ## 尚未加入（規劃書已選定）
 
-image-webp、tiff、jxl、rav1d 依各階段加入；avif-parse 等對照用 crate 只放 dev-dependencies。
+jxl、rav1d 依各階段加入；avif-parse 等對照用 crate 只放 dev-dependencies。規劃書選定的 tiff crate 經階段 4 驗證後不採用（D-R17）。
