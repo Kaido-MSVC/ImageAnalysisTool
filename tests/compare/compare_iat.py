@@ -213,6 +213,16 @@ if os.path.isdir(JXLGEN):
     cases.append(Case("jxlgen_inspect_lossy_noxyb", ["inspect", lossy]))
 
 
+# ---- AVIF (stage 6): grid images written with the C++ build's libavif (tests/fixtures/avif_generated, D-R19)
+AVIFGEN = os.path.join(FIX, "..", "avif_generated")
+if os.path.isdir(AVIFGEN):
+    g = lambda n: os.path.join(AVIFGEN, n)
+    for n in ("rgb8", "rgba8"):
+        cases.append(Case("avifgen_inspect_grid_" + n, ["inspect", g("v_avif_grid_%s.avif" % n)]))
+        cases.append(Case("avifgen_grid_%s_vs_png" % n, ["compare", g("v_avif_grid_%s.avif" % n),
+                                                          g("v_avif_grid_ref_%s.png" % n)]))
+
+
 def make_sparse(d):
     p = os.path.join(d, "sparse_16gib.bin")
     open(p, "wb").close()
