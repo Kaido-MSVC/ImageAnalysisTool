@@ -25,6 +25,7 @@
 | miniz_oxide | 0.8.9 | 0.8.9 | MIT OR Zlib OR Apache-2.0 | 階段 1：iCCP／zTXt／iTXt 解壓與 IDAT 串流檢查（區分 Adler-32、損壞、截斷）；與 png 用的是同一版 |
 | crc32fast | 1.5.5 | 1.5.5 | MIT OR Apache-2.0 | 階段 1：PNG chunk CRC（png 也使用） |
 | image-webp | 0.2.4 | 0.2.4 | MIT OR Apache-2.0 | 階段 3：WebP 的 VP8L 解碼；只交 VP8L chunk 的內容（D-R15） |
+| jxl（jxl-rs） | 0.8.0 | 0.8.0 | BSD-3-Clause | 階段 5：JPEG XL 解碼；預設 feature（`all-simd`）。不轉向、不渲染 spot color、不反乘，輸出 codestream 原本位元深度的整數樣本（D-R18） |
 | weezl | 0.1.12 | 0.1.12 | MIT OR Apache-2.0 | 階段 4：TIFF 的 LZW 解壓（TIFF 早換碼寬、輸出滿了就停；舊式碼用 LSB 順序），照 libtiff 的行為包裝（D-R17） |
 
 windows-sys 啟用的 feature：`Win32_Foundation`、`Win32_Globalization`、`Win32_Storage_FileSystem`、`Win32_System_Console`、`Win32_System_Diagnostics_Debug`、`Win32_Security_Cryptography`。
@@ -40,6 +41,10 @@ block-buffer 0.12.1、cfg-if 1.0.5、const-oid 0.10.3、cpufeatures 0.3.1、cryp
 階段 4（2026-11-21）：weezl 0.1.12 只用預設 feature（`std`），沒有其他依賴；它原本就在 Cargo.lock 裡（Slint 經 resvg → gif 帶入），iat-core 與 iat-cli 因此多了這一個 crate，Cargo.lock 沒有新增項目。TIFF 的 Deflate 沿用 miniz_oxide 0.8.9。驗證時用過的 tiff crate 0.11.3 沒有加入（D-R17）。`cargo deny check` 通過。
 
 `cargo deny check`（advisories、bans、licenses、sources）全部通過。唯一的警告是 miniz_oxide 有兩個版本（png 直接用 0.8.9，png 依賴的 flate2 用 0.9.1），不改 png 就無法消除，屬於預期內。
+
+階段 5（2026-11-21，jxl 0.8.0 帶入）：jxl_macros 0.8.0、jxl_simd 0.8.0、jxl_transforms 0.8.0（BSD-3-Clause）、array-init 2.1.0、num-derive 0.4.2（MIT OR Apache-2.0）、byteorder 1.5.0（Unlicense OR MIT）；num-traits、thiserror 原本就在 Cargo.lock 裡。`cargo deny check` 通過，BSD-3-Clause 原本就在允許清單。jxl 與 libjxl 的授權條文放在 repo 的 `licenses/`。
+
+**libjxl 0.12.0 只用於產生資料，不是依賴**：`tools/libjxl_gen/` 的 C++ 程式連結 C++ 版建置裡的靜態 libjxl（唯讀），產生 `crates/iat-core/data/jxl_icc_table.bin`（ICC 查表，269,112 bytes，SHA-256 `569fabcd015146eefdb783021ed0e4b13c8d4e7e930f54ce91218e53653e0d98`）與 `tests/fixtures/jxl_generated/` 的測試圖。建置用 MSVC 14.52（同 C++ 建置）與靜態 CRT（D-R18）。
 
 **miniz_oxide 維持 0.8.9（2026-11-21 確認）**：png 0.18.1 的 `Cargo.toml` 直接宣告 `miniz_oxide = "0.8"`（解碼用），0.9.1 只來自 png → flate2 1.1.11（編碼用）。iat-core 的直接依賴本來就和 png 同為 0.8.9；改成 0.9.x 不會少掉任何一版，反而變成 iat-core 用 0.9、png 用 0.8。等 png 改用 0.9 時再一起升。
 
@@ -67,4 +72,4 @@ GUI 帶入約 290 個間接依賴（全部是純 Rust，沒有 C/C++ 預建檔�
 
 ## 尚未加入（規劃書已選定）
 
-jxl、rav1d 依各階段加入；avif-parse 等對照用 crate 只放 dev-dependencies。規劃書選定的 tiff crate 經階段 4 驗證後不採用（D-R17）。
+rav1d 依階段 6 加入；avif-parse 等對照用 crate 只放 dev-dependencies。規劃書選定的 tiff crate 經階段 4 驗證後不採用（D-R17）。
