@@ -8,6 +8,9 @@
 //! 分析在 iat-worker.exe 裡執行（[`worker`]，D-R02 第三次修訂）。
 #![deny(unsafe_code)]
 
+pub mod avif_parse;
+pub mod avif_scan;
+pub mod avif_side;
 pub mod engine;
 pub mod exit;
 pub mod inflate;

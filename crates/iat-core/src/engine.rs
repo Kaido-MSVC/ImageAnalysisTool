@@ -349,7 +349,7 @@ fn new_side<'a>(
 
 /// 這個版本有前端（掃描與解碼器）的格式。
 pub(crate) fn has_frontend(format: &str) -> bool {
-    matches!(format, "png" | "webp" | "psd" | "psb" | "tiff" | "bigtiff" | "jxl_codestream" | "jxl_container")
+    matches!(format, "png" | "webp" | "psd" | "psb" | "tiff" | "bigtiff" | "jxl_codestream" | "jxl_container" | "avif")
 }
 
 fn prepare_side<'a>(s: &mut Side<'a>, issues: &mut Vec<Issue>, lim: &Limits) {
@@ -366,6 +366,8 @@ fn prepare_side<'a>(s: &mut Side<'a>, issues: &mut Vec<Issue>, lim: &Limits) {
         s.dec = crate::tiff_side::prepare_tiff(st, issues, lim);
     } else if st.rep.format == "jxl_codestream" || st.rep.format == "jxl_container" {
         s.dec = crate::jxl_side::prepare_jxl(st, issues, lim);
+    } else if st.rep.format == "avif" {
+        s.dec = crate::avif_side::prepare_avif(st, issues, lim);
     } else {
         let t0 = Instant::now();
         st.rep.container_status = "unverified".into();
@@ -410,6 +412,7 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Outcome {
     r.codecs.insert(crate::webp_side::DECODER_NAME.into(), crate::webp_side::DECODER_VERSION.into());
     r.codecs.insert(crate::tiff_side::DECODER_NAME.into(), crate::tiff_side::DECODER_VERSION.into());
     r.codecs.insert(crate::jxl_side::DECODER_NAME.into(), crate::jxl_side::DECODER_VERSION.into());
+    r.codecs.insert(crate::avif_side::DECODER_NAME.into(), crate::avif_side::DECODER_VERSION.into());
 
     let quota = Rc::new(RefCell::new(TempQuota::new(lim.temp_gib << 30, input.temp_free_bytes)));
     let mut issues: Vec<Issue> = Vec::new();
@@ -595,6 +598,8 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Outcome {
     let rows_done = |a: &Side<'_>, b: Option<&Side<'_>>| a.st.rows + b.map_or(0, |b| b.st.rows);
     input.progress.report(Stage::Analyze, 0, total_rows);
     let mut stats = Stats::default();
+    // AVIF 的像素驗證結果（[original, output]）：(pixel_verified, basis)
+    let mut avif_verdict: [Option<(Option<bool>, String)>; 2] = [None, None];
     let mut names: &[&str] = &[];
     let (mut a_alpha, mut b_alpha): (Option<usize>, Option<usize>) = (None, None);
     if comparable
@@ -752,7 +757,31 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Outcome {
                 format!("PSD merged colour is blended with white where alpha < max; the other file's alpha is {other}"),
             ));
         }
-        // AVIF 的像素驗證判定：階段 6 加入。
+        // AVIF：像素驗證的無損判定，和 metadata 的判定分開記錄（欄位在最後寫回，問題照 C++ 版的順序）。
+        for (i, (f, this, other)) in [(oa, "original", ob), (ob, "output", oa)].into_iter().enumerate() {
+            if f.avif.as_ref().is_none_or(|av| av.lossless_metadata != "consistent") {
+                continue;
+            }
+            let sc = &r.samples;
+            avif_verdict[i] = Some(if sc.status == "equal" {
+                let peer = if this == "original" { "output" } else { "original" };
+                issues.push(Issue::new(
+                    code::AVIF_PIXEL_VERIFIED_LOSSLESS,
+                    "info",
+                    this,
+                    format!("pixel-verified: samples equal the {peer} ({})", other.format),
+                ));
+                (
+                    Some(true),
+                    "every sample (alpha included, also under A=0) equals the other file's native samples".to_string(),
+                )
+            } else if sc.status == "differs" {
+                (Some(false), "samples differ from the other file".to_string())
+            } else {
+                let why = if sc.reason.is_empty() { &sc.status } else { &sc.reason };
+                (None, format!("not compared: {why}"))
+            });
+        }
 
         // ---- 幾何
         if oa.width != 0 && ob.width != 0 {
@@ -965,6 +994,13 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Outcome {
     m.io_read_bytes = Some(Count(input.original.bytes_read() + input.output.map_or(0, Input::bytes_read)));
 
     r.issues = issues;
+    let reps = std::iter::once(&mut a.st.rep).chain(b.as_mut().map(|b| &mut b.st.rep));
+    for (rep, v) in reps.zip(avif_verdict) {
+        if let (Some(av), Some((pv, basis))) = (rep.avif.as_mut(), v) {
+            av.pixel_verified = pv;
+            av.pixel_verified_basis = basis;
+        }
+    }
     r.original = std::mem::take(&mut a.st.rep);
     if let Some(mut b) = b {
         r.output = Some(std::mem::take(&mut b.st.rep));
