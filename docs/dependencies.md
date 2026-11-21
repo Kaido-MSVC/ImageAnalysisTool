@@ -38,6 +38,8 @@ block-buffer 0.12.1、cfg-if 1.0.5、const-oid 0.10.3、cpufeatures 0.3.1、cryp
 
 `cargo deny check`（advisories、bans、licenses、sources）全部通過。唯一的警告是 miniz_oxide 有兩個版本（png 直接用 0.8.9，png 依賴的 flate2 用 0.9.1），不改 png 就無法消除，屬於預期內。
 
+**miniz_oxide 維持 0.8.9（2026-11-21 確認）**：png 0.18.1 的 `Cargo.toml` 直接宣告 `miniz_oxide = "0.8"`（解碼用），0.9.1 只來自 png → flate2 1.1.11（編碼用）。iat-core 的直接依賴本來就和 png 同為 0.8.9；改成 0.9.x 不會少掉任何一版，反而變成 iat-core 用 0.9、png 用 0.8。等 png 改用 0.9 時再一起升。
+
 ## dev-dependencies
 
 | crate | 宣告 | Cargo.lock | 授權 | 用途 |
