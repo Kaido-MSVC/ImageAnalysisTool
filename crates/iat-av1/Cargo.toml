@@ -1,0 +1,15 @@
+[package]
+name = "iat-av1"
+description = "Safe wrapper over rav1d's dav1d_* API: decodes one still AV1 frame into its planes"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+rav1d.workspace = true
+
+[lints]
+workspace = true

@@ -59,9 +59,11 @@ unknown-git = "deny"
 [advisories]
 # 需要網路抓 RustSec 資料庫；離線時以 `cargo deny check licenses bans sources` 代替。
 yanked = "deny"
-# 只忽略「不再維護」通知，不忽略漏洞；兩者都是 Slint 1.19.0 的間接依賴、沒有可升級的版本（D-R14）。
+# 只忽略「不再維護」通知，不忽略漏洞；前兩筆是 Slint 1.19.0 的間接依賴、沒有可升級的版本（D-R14）。
 # Slint 升級時重新檢查，能拿掉就拿掉。
 ignore = [
     { id = "RUSTSEC-2026-0441", reason = "pin-utils unmaintained; via spin_on <- slint-build/slint-macros (build time only)" },
     { id = "RUSTSEC-2026-0543", reason = "chrono unmaintained; via i-slint-core, no replacement in Slint 1.19.0" },
+    # 階段 6：rav1d 1.1.0 的 proc-macro 依賴（只在編譯時執行），rav1d 沒有不依賴它的版本（D-R19）。
+    { id = "RUSTSEC-2024-0436", reason = "paste unmaintained; proc-macro of rav1d 1.1.0 (build time only)" },
 ]

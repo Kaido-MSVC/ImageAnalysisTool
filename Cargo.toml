@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/iat-core", "crates/iat-cli", "crates/iat-gui"]
+members = ["crates/iat-av1", "crates/iat-core", "crates/iat-cli", "crates/iat-gui"]
 
 [workspace.package]
 version = "0.1.0"
@@ -12,12 +12,15 @@ publish = false
 
 # 版本變更要同步記在 docs/dependencies.md。
 [workspace.dependencies]
+iat-av1 = { path = "crates/iat-av1" }
 iat-core = { path = "crates/iat-core" }
 # 只放 dev-dependencies：PSD／PSB 的交叉比對（規劃書，D-R16）
 apeireth-image-psd = { version = "2.0.0-rc.5", default-features = false }
 image-webp = "0.2.4"
 # 階段 5：JPEG XL 解碼（jxl-rs，D-R18）
 jxl = "0.8.0"
+# 階段 6：AV1 解碼（rav1d，D-R09）；不編入組合語言，只開 8／16 位元
+rav1d = { version = "1.1.0", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
 crc32fast = "1.5.5"
 miniz_oxide = "0.8.9"
 png = "0.18.1"

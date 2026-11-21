@@ -27,6 +27,7 @@
 | image-webp | 0.2.4 | 0.2.4 | MIT OR Apache-2.0 | 階段 3：WebP 的 VP8L 解碼；只交 VP8L chunk 的內容（D-R15） |
 | jxl（jxl-rs） | 0.8.0 | 0.8.0 | BSD-3-Clause | 階段 5：JPEG XL 解碼；預設 feature（`all-simd`）。不轉向、不渲染 spot color、不反乘，輸出 codestream 原本位元深度的整數樣本（D-R18） |
 | weezl | 0.1.12 | 0.1.12 | MIT OR Apache-2.0 | 階段 4：TIFF 的 LZW 解壓（TIFF 早換碼寬、輸出滿了就停；舊式碼用 LSB 順序），照 libtiff 的行為包裝（D-R17） |
+| rav1d | 1.1.0（`default-features = false`，feature `bitdepth_8`、`bitdepth_16`） | 1.1.0 | BSD-2-Clause | 階段 6：AV1 解碼，只經 `crates/iat-av1` 的安全包裝使用；不編入組合語言（不開 `asm`），日誌關閉（D-R09、D-R19） |
 
 windows-sys 啟用的 feature：`Win32_Foundation`、`Win32_Globalization`、`Win32_Storage_FileSystem`、`Win32_System_Console`、`Win32_System_Diagnostics_Debug`、`Win32_Security_Cryptography`。
 
@@ -70,6 +71,12 @@ GUI 帶入約 290 個間接依賴（全部是純 Rust，沒有 C/C++ 預建檔�
 - advisories：忽略兩筆「不再維護」通知（不是漏洞），都是 Slint 1.19.0 的間接依賴、沒有可升級的版本：RUSTSEC-2026-0441（pin-utils，經 spin_on，只在建置時使用）、RUSTSEC-2026-0543（chrono，經 i-slint-core）。Slint 升級時重新檢查。
 - bans：多版本警告增加 glow、hashbrown、smol_str、syn、windows-sys，都來自 Slint／wgpu 的依賴樹，屬於預期內。
 
+階段 6（2026-11-21，rav1d 1.1.0 帶入）：assert_matches 1.5.0、atomig 0.4.3、atomig-macro 0.4.0、paste 1.0.15、parking_lot 0.12.5（MIT OR Apache-2.0）、raw-cpuid 11.6.0、strum 0.26.3、strum_macros 0.26.4（MIT）、to_method 1.1.0（CC0-1.0）、zerocopy 0.7.35、zerocopy-derive 0.7.35（BSD-2-Clause OR Apache-2.0 OR MIT）；建置時另有 nasm-rs 0.3.2 與 cc（不開 `asm` 時 build.rs 不呼叫它們，不需要 NASM 或 C 編譯器）。strum、zerocopy 和 Slint 用的 0.28／0.8 各成兩版，屬於預期內的多版本警告。
+- advisories：忽略 RUSTSEC-2024-0436（paste 不再維護，不是漏洞）。paste 是 rav1d 的 proc-macro，只在編譯時執行，rav1d 1.1.0 沒有不依賴它的版本。
+- `cargo deny check` 通過。
+
+**libavif 1.4.2 + aom 3.15.2 只用於驗證，不是依賴**：`tools/libavif_gen/` 的 C++ 程式連結 C++ 版建置裡的靜態庫（唯讀），傾印 libavif 解出的平面給 rav1d 對照，另有一支只供量測用的編碼程式（D-R19）。
+
 ## 尚未加入（規劃書已選定）
 
-rav1d 依階段 6 加入；avif-parse 等對照用 crate 只放 dev-dependencies。規劃書選定的 tiff crate 經階段 4 驗證後不採用（D-R17）。
+avif-parse 等對照用 crate 只放 dev-dependencies（目前沒有加入）。規劃書選定的 tiff crate 經階段 4 驗證後不採用（D-R17）。
