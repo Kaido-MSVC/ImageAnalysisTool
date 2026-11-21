@@ -348,6 +348,48 @@ C++ 版的訊息 `image resource 0x<id> name runs past the resource section` 在
 
 新增的直接依賴：weezl 0.1.12（MIT OR Apache-2.0，原本已在 Cargo.lock 中，經 GUI 依賴帶入）。
 
+### D-R18 JPEG XL：jxl-rs 解碼，libjxl 的 ICC 改用查表（2026-11-21，階段 5）
+
+**做法**（`crates/iat-core/src/jxl_scan.rs`、`jxl_header.rs`、`jxl_icc.rs`、`jxl_side.rs`）：
+- `jxl_scan` 逐行移植 C++ 版的 box 掃描（另外記下 codestream 各段的位置）。
+- 解碼用 jxl crate 0.8.0（jxl-rs）：
+  - 不轉向（`adjust_orientation = false`）、不渲染 spot color、不反乘 alpha。
+  - 輸出 codestream 原本位元深度的整數樣本，10／12-bit 交出原生數值，同 C++ 版的 `JXL_BIT_DEPTH_FROM_CODESTREAM`。
+  - 整張影像解出後依列寫進暫存檔，同 C++ 版的 WholeImageDecoder。
+- **標頭輪**：jxl-rs 讀基本資訊、色彩與各 frame 標頭（`scan_frames_only`）；讀到最後一個 frame 的標頭就算成功，同 libjxl 的標頭輪。
+- **ImageMetadata 自己解析**（`jxl_header`，讀到色彩空間為止）：extra channel 的位元深度與色彩聲道數 jxl-rs 沒有公開，C++ 版用來判斷「alpha 深度與色彩深度不同」。單元測試對所有 JXL 測試圖和 jxl-rs 的基本資訊交叉核對。
+- 支援範圍與 C++ 1.0.0 相同：XYB、動畫、浮點、超過 16-bit、alpha 深度不同都在解碼前回報不支援；extra channel 照樣警告。
+- 截斷：整個檔案都給了解碼器還要輸入，判為截斷。裸 codestream 結尾之後的位元組用解碼器的 `file_length` 算出。
+- `jxl_equivalence`（D12 的色彩等價規則）移植到 engine。
+
+**ICC 查表（使用者決定，不移植 libjxl 的 ICC 產生程式）**：浮點的 pow／log 在 MSVC 與 Rust 不保證逐位元一致，所以改用查表。
+- 產生方式：`tools/libjxl_gen/gen_jxl_icc_table.cpp` 連結 C++ 版建置裡的 libjxl 0.12.0 靜態庫（唯讀，MSVC 14.52、靜態 CRT）。對每個非自訂的列舉值組合，用 libjxl 編碼 1×1 的無損影像，再用 libjxl 解碼器以 `JxlDecoderGetColorAsICCProfile(TARGET_ORIGINAL)` 讀回，和 C++ iat 用的是同一個呼叫；`build.ps1` 一次重產。
+- 涵蓋範圍：RGB 216 組（白點 D65／E／DCI × 原色 sRGB／BT.2100／P3 × 6 種轉換函數 × 4 種演算意圖）、灰階 72 組、XYB 1 組，共 289 筆。
+  - libjxl 自己也產生不了的組合不收：轉換函數或色彩空間為 unknown；XYB 只有 perceptual。
+- 資料檔 `crates/iat-core/data/jxl_icc_table.bin`：269,112 bytes，原始格式，SHA-256 `569fabcd015146eefdb783021ed0e4b13c8d4e7e930f54ce91218e53653e0d98`。單元測試確認嵌入的資料與記錄的雜湊相符，並確認 sRGB、灰階、PQ、HLG 這 4 筆和 C++ 版報告裡的雜湊相同。重產兩次逐位元組相同。
+- 來源：libjxl 0.12.0（BSD-3-Clause），條文與說明在 `licenses/`。報告裡的 `profile_name` 照 C++ 版寫「synthesized by libjxl 0.12.0 from the colour enum」，資料確實出自這一版。
+- **已知差異**：自訂白點、原色或 gamma 查不到。C++ 版會有 libjxl 產生的 ICC（`synthesized`），Rust 版記為 `unreadable`，所以 ICC 的比較結果不同；色彩判定依 key 比較，兩側都是同一組自訂值時仍判為相同，和 ICC 比對時判為未驗證。目前的測試圖沒有用到。
+
+**已知差異（jxl-rs 0.8.0 的限制）**：
+- **圖層數**：jxl-rs 0.8.0 有 `coalescing` 選項但沒有實作，`scan_frames_only` 也只記錄可見的 frame，無法得知圖層數，所以不產生 `layered_image`（info，不影響判定）。
+  - 樣本照樣是合成後的結果，和 libjxl 一致。
+  - `jxl_two_layers_vs_composite_png` 暫時列為允許差異：允許差異表的欄位 `issues[code=layered_image]` 表示比對時只略過 C++ 版的這一筆問題（JSON 與 Markdown），其餘問題照常逐項比對。
+  - 給上游的修改提案見 `docs/jxl-rs-upstream-proposal.md`。上游公開 frame header 後再補做並移除這筆允許差異。
+- **配置上限**：jxl-rs 沒有記憶體分配器的掛鉤。C++ 版的 libjxl 配置超過硬上限（`job_commit_mib` − 64 MiB）時判為 `resource_limit`，Rust 版只做事前預估（照 C++ 公式：(4 × 所有聲道 + 1) B/px + 8 MiB），所以「預估通過但實際超過」的情況不會判為 `resource_limit`。**階段 6 恢復 worker 時，評估讓 JXL 也走 worker**，用 Job Object 補上硬上限。
+- 轉換函數為 unknown 的色彩列舉值：libjxl 照樣解碼（ICC 為 absent），jxl-rs 會在標頭就回報錯誤。
+- 自訂色度值寫進 key 時，jxl-rs 給的是 f32，C++ 版是 double，極少數值的第 6 位小數可能不同。
+- 這兩項目前的測試圖都沒有用到。
+
+**非 XYB 的有損 JXL（使用者決定）**：
+- 測試圖 `tests/fixtures/jxl_generated/v_jxl_rgb16_lossy_vardct_noxyb.jxl` 用 libjxl 0.12.0 產生（VarDCT、保留原始色彩），C++ 1.0.0 會解碼並和 PNG 比較。
+- jxl-rs 解出的樣本和 libjxl 有少量最低位元差異。不同的像素數、各聲道最大誤差、strict 判定與問題代碼相同；各聲道的 `mae`、`rmse` 與一個列出的差異樣本值不同。
+- 理由：有損解碼的結果依解碼器而異，libjxl 與 jxl-rs 都是合規的解碼器。IMB-C 的 JXL 輸出一律無損，不受影響。
+- 只對這類案例、只對這些數值列為允許差異。比對腳本也把允許的數值差異換回 Markdown，格式為 6 位有效數字。
+
+訊息字首是 `jxl-rs` 對 C++ 版的 `libjxl`，列在允許差異；`decode_path` 改名為 `jxl-rs+temp`，已由萬用規則涵蓋。
+
+新增的直接依賴：jxl 0.8.0（BSD-3-Clause），帶入 jxl_macros、jxl_simd、jxl_transforms、array-init、num-derive、byteorder。`cargo deny check` 通過。
+
 ## 允許的差異
 
 比對腳本讀這張表；表格以外的差異一律算失敗。欄位為 JSON 的點路徑，或 `exit`、`stderr`、`markdown`；可用 `*` 萬用字元。
@@ -391,3 +433,9 @@ C++ 版的訊息 `image resource 0x<id> name runs past the resource section` 在
 | tiff_libtiff_alloc_limit | issues[*].message | 字首 `tiff decoder allocation limit` 對 `libtiff allocation limit`，其餘文字與 `decoder_errors` 相同（D-R17） |
 | tiffvar_v_deflate_corrupt | issues[*].message | 同 tiff_corrupt_deflate_data；另外 zlib 的 `invalid distance too far back` 在 miniz_oxide 回報為 `incorrect data check`（D-R17） |
 | tiffvar_v_deflate_corrupt | *.decoder_errors[*] | 同上 |
+| jxl_two_layers_vs_composite_png | issues[code=layered_image] | **暫時**：jxl crate 0.8.0 沒有實作 `coalescing = false`，無法得知圖層數，所以不產生 `layered_image`（info，不影響判定）；比對時只略過 C++ 版的這一筆問題，其餘問題照常逐項比對。等上游公開 frame header 後移除（D-R18） |
+| jxl_codestream_truncated | issues[*].message | 解碼失敗訊息字首 `jxl-rs` 對 `libjxl`，其餘文字相同；代碼與判定相同（D-R18） |
+| inspect_jxl_truncated | issues[*].message | 同 jxl_codestream_truncated |
+| jxlgen_lossy_noxyb_vs_png | samples.per_channel[*].mae | 非 XYB 的有損 JXL：有損解碼的結果依解碼器而異，libjxl 與 jxl-rs 都是合規的解碼器，樣本有少量最低位元差異；不同的像素數、最大誤差、strict 判定與問題代碼仍要求一致。IMB-C 的 JXL 輸出一律無損，不受影響（D-R18） |
+| jxlgen_lossy_noxyb_vs_png | samples.per_channel[*].rmse | 同上 |
+| jxlgen_lossy_noxyb_vs_png | samples.first_differences[*].output[*] | 同上（只限列出的差異樣本的輸出值） |
