@@ -47,7 +47,7 @@ use windows_sys::Win32::System::Pipes::CreatePipe;
 use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
 use windows_sys::Win32::System::Threading::{
     CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW, CREATE_SUSPENDED, CreateProcessW, DeleteProcThreadAttributeList,
-    EXTENDED_STARTUPINFO_PRESENT, ExitProcess, GetExitCodeProcess, InitializeProcThreadAttributeList,
+    EXTENDED_STARTUPINFO_PRESENT, GetCurrentProcess, GetExitCodeProcess, InitializeProcThreadAttributeList,
     LPPROC_THREAD_ATTRIBUTE_LIST, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, PROCESS_INFORMATION, ResumeThread,
     STARTF_USESTDHANDLES, STARTUPINFOEXW, TerminateProcess, UpdateProcThreadAttribute, WaitForSingleObject,
 };
@@ -628,7 +628,11 @@ fn write_all_raw(h: HANDLE, data: &[u8]) {
     }
 }
 
-/// 把出事的一側寫到通道、固定字串寫到 stdout 後結束程序；不配置記憶體、不跑解構與 atexit。
+/// 把出事的一側寫到通道、固定字串寫到 stdout 後終止程序；不配置記憶體。
+///
+/// 用 `TerminateProcess` 而不是 `ExitProcess`：後者會執行 TLS 回呼（Rust 的 `thread_local`
+/// 解構）與各 DLL 的 `DLL_PROCESS_DETACH`，那些程式碼可能再配置記憶體而回到這裡，或取用被終止的
+/// 執行緒留下的鎖而卡住。`WriteFile` 是同步寫入，返回時資料已經在管線裡。
 fn allocation_failed() -> ! {
     let side = ALLOC_SIDE.load(Ordering::SeqCst);
     let chan = ALLOC_CHANNEL.load(Ordering::SeqCst);
@@ -642,8 +646,14 @@ fn allocation_failed() -> ! {
     // SAFETY: 取得本程序的標準輸出 handle。
     let out = unsafe { GetStdHandle(STD_OUTPUT_HANDLE) };
     write_all_raw(out, ALLOC_FAILED_JSON);
-    // SAFETY: 直接結束本程序；不回到 Rust 程式碼。
-    unsafe { ExitProcess(ALLOC_FAILED_EXIT) }
+    // SAFETY: 取得本程序的虛擬 handle，不必關閉。
+    let me = unsafe { GetCurrentProcess() };
+    // SAFETY: 終止本程序；不執行 TLS 回呼、DLL detach 或任何 Rust 程式碼。
+    unsafe { TerminateProcess(me, ALLOC_FAILED_EXIT) };
+    // TerminateProcess 終止自己時不會返回；萬一返回，也不能回到配置器的呼叫者。
+    loop {
+        std::hint::spin_loop();
+    }
 }
 
 /// worker 的全域配置器：系統配置器加上「配置失敗就回報 resource_limit 並結束」。
