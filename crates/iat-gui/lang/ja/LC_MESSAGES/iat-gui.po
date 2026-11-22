@@ -1,0 +1,421 @@
+# iat-gui 日本語訳。原文は crates/iat-gui/ui/app.slint。lang/check_po.py で抜けを確認する。
+msgid ""
+msgstr ""
+"Language: ja\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+msgid "Drop a file anywhere on the window, or choose one."
+msgstr "ファイルをウィンドウのどこかにドロップするか、［選択…］を押してください。"
+
+msgid "Choose…"
+msgstr "選択…"
+
+msgid "Clear"
+msgstr "クリア"
+
+msgid "Choose the original and the converted file. With only the original, the file is inspected on its own."
+msgstr "元ファイルと変換後のファイルを選んでください。元ファイルだけの場合は、そのファイルを単独で検査します。"
+
+msgid "Original"
+msgstr "元ファイル"
+
+msgid "The reference file."
+msgstr "基準となるファイル。"
+
+msgid "Swap"
+msgstr "入れ替え"
+
+msgid "Output"
+msgstr "出力ファイル"
+
+msgid "The converted file to check against the original (optional)."
+msgstr "元ファイルと照合する変換結果（省略可）。"
+
+msgid "Dropping two files fills Original and Output in drop order. A single file fills Original first, then Output."
+msgstr "2 つ同時にドロップすると、順に元ファイルと出力ファイルに入ります。1 つの場合は元ファイルが空ならそこへ、埋まっていれば出力ファイルへ入ります。"
+
+msgid "Compare"
+msgstr "比較"
+
+msgid "Inspect"
+msgstr "検査"
+
+msgid "Reading and hashing the inputs…"
+msgstr "入力ファイルを読み込み、ハッシュを計算しています…"
+
+msgid "Decoding and comparing…"
+msgstr "デコードと比較を行っています…"
+
+msgid "{}%"
+msgstr "{}%"
+
+msgid "Cancelling…"
+msgstr "キャンセルしています…"
+
+msgid "Cancel"
+msgstr "キャンセル"
+
+msgid "Strict match"
+msgstr "厳密に一致"
+
+msgid "File is clean"
+msgstr "ファイルは正常"
+
+msgid "Strict mismatch"
+msgstr "厳密には不一致"
+
+msgid "Indeterminate"
+msgstr "判定不能"
+
+msgid "Decode or structure failure"
+msgstr "デコードまたは構造の異常"
+
+msgid "Not checked"
+msgstr "未検査"
+
+msgid "Run error"
+msgstr "実行エラー"
+
+msgid "Samples, colour and metadata agree."
+msgstr "サンプル、色、メタデータがすべて一致しています。"
+
+msgid "The file decoded completely; container and metadata are valid."
+msgstr "ファイルは完全にデコードでき、コンテナとメタデータも有効です。"
+
+msgid "The files differ. See the reasons and issues below."
+msgstr "ファイルが異なります。理由と問題は下に表示しています。"
+
+msgid "The tool could not prove a match or a mismatch."
+msgstr "一致とも不一致とも証明できませんでした。"
+
+msgid "At least one file is damaged or failed to decode."
+msgstr "少なくとも 1 つのファイルが破損しているか、デコードに失敗しました。"
+
+msgid "Stopped by a resource limit, the deadline or cancellation."
+msgstr "リソース上限、制限時間、またはキャンセルにより停止しました。"
+
+msgid "An input could not be read, or the environment failed."
+msgstr "入力ファイルを読めないか、実行環境でエラーが発生しました。"
+
+msgid "Exit code {} ({}) · strict: {}"
+msgstr "終了コード {}（{}）· strict：{}"
+
+msgid "Samples"
+msgstr "サンプル"
+
+msgid "Colour"
+msgstr "色"
+
+msgid "Metadata"
+msgstr "メタデータ"
+
+msgid "Reasons"
+msgstr "理由"
+
+msgid "Issues ({})"
+msgstr "問題（{}）"
+
+msgid "No issues were reported."
+msgstr "問題は報告されていません。"
+
+msgid "Error"
+msgstr "エラー"
+
+msgid "Warning"
+msgstr "警告"
+
+msgid "Info"
+msgstr "情報"
+
+msgid "Report saved: {}"
+msgstr "レポートを保存しました：{}"
+
+msgid "A file with this name already exists and is never overwritten. Choose a different file name: {}"
+msgstr "同じ名前のファイルがあります。レポートは上書きしません。別のファイル名を選んでください：{}"
+
+msgid "The report cannot replace one of the input files. Choose a different file name: {}"
+msgstr "レポートで入力ファイルを置き換えることはできません。別のファイル名を選んでください：{}"
+
+msgid "The folder does not exist: {}"
+msgstr "フォルダーが存在しません：{}"
+
+msgid "The report could not be saved: {}"
+msgstr "レポートを保存できませんでした：{}"
+
+msgid "Export JSON…"
+msgstr "JSON をエクスポート…"
+
+msgid "Export Markdown…"
+msgstr "Markdown をエクスポート…"
+
+msgid "View images"
+msgstr "画像を表示"
+
+msgid "New comparison"
+msgstr "ファイルを選び直す"
+
+msgid "Difference"
+msgstr "差分"
+
+msgid "Fit"
+msgstr "全体表示"
+
+msgid "ICC not applied"
+msgstr "ICC 未適用"
+
+msgid "Decoding the images for viewing…"
+msgstr "表示用に画像をデコードしています…"
+
+msgid "The images cannot be shown: {}"
+msgstr "画像を表示できません：{}"
+
+msgid "Difference: black means equal; red to yellow to white shows the largest channel difference (log scale)."
+msgstr "差分：黒は同一、赤から黄、白になるほどチャンネル間の最大差が大きいことを示します（対数スケール）。"
+
+msgid "The images have different dimensions, so no difference map is shown."
+msgstr "画像のサイズが異なるため、差分マップは表示しません。"
+
+msgid "The images use different sample models or bit depths, so no difference map is shown."
+msgstr "サンプルモデルまたはビット深度が異なるため、差分マップは表示しません。"
+
+msgid "Image Analysis Tool checks whether a converted image keeps every sample, colour signal and piece of metadata of the original."
+msgstr "Image Analysis Tool は、変換後の画像が元ファイルのサンプル、色情報、メタデータをすべて保っているかを確認します。"
+
+msgid "Licensed under the MIT License. Reports are never overwritten; input files are opened read-only."
+msgstr "MIT ライセンスで提供しています。レポートは上書きせず、入力ファイルは読み取り専用で開きます。"
+
+msgid "Files"
+msgstr "ファイル"
+
+msgid "Results"
+msgstr "結果"
+
+msgid "Images"
+msgstr "画像"
+
+msgid "About"
+msgstr "このアプリについて"
+
+msgid "equal"
+msgstr "一致"
+
+msgid "differs"
+msgstr "差異あり"
+
+msgid "not comparable"
+msgstr "比較不可"
+
+msgid "not compared"
+msgstr "未比較"
+
+msgid "incomplete"
+msgstr "不完全"
+
+msgid "decode incomplete"
+msgstr "デコード不完全"
+
+msgid "geometry differs"
+msgstr "サイズが異なる"
+
+msgid "orientation differs"
+msgstr "向きが異なる"
+
+msgid "orientation unparseable"
+msgstr "向き情報を解析できない"
+
+msgid "orientation unknown"
+msgstr "向きが不明"
+
+msgid "sample model changed"
+msgstr "サンプルモデルが変化"
+
+msgid "bit depth changed"
+msgstr "ビット深度が変化"
+
+msgid "unknown"
+msgstr "不明"
+
+msgid "unverified"
+msgstr "未検証"
+
+msgid "unreadable"
+msgstr "読み取り不可"
+
+msgid "missing on original"
+msgstr "元ファイルにない"
+
+msgid "missing on output"
+msgstr "出力ファイルにない"
+
+msgid "both absent"
+msgstr "どちらにもない"
+
+msgid "both synthesized"
+msgstr "どちらも推定値"
+
+msgid "synthesized vs absent"
+msgstr "推定値と未指定"
+
+msgid "same"
+msgstr "同じ"
+
+msgid "changed"
+msgstr "変更あり"
+
+msgid "added"
+msgstr "追加"
+
+msgid "removed"
+msgstr "削除"
+
+msgid "parse failed"
+msgstr "解析失敗"
+
+msgid "over limit"
+msgstr "上限超過"
+
+msgid "complete"
+msgstr "完了"
+
+msgid "partial"
+msgstr "一部のみ"
+
+msgid "failed"
+msgstr "失敗"
+
+msgid "not checked"
+msgstr "未検査"
+
+msgid "unsupported"
+msgstr "非対応"
+
+msgid "input open failed"
+msgstr "入力ファイルを開けない"
+
+msgid "environment error"
+msgstr "環境エラー"
+
+msgid "unknown format"
+msgstr "不明な形式"
+
+msgid "format not supported in this build"
+msgstr "このビルドでは非対応の形式"
+
+msgid "match"
+msgstr "一致"
+
+msgid "mismatch"
+msgstr "不一致"
+
+msgid "indeterminate"
+msgstr "判定不能"
+
+msgid "not evaluated"
+msgstr "未評価"
+
+msgid "strict match"
+msgstr "厳密に一致"
+
+msgid "strict mismatch"
+msgstr "厳密には不一致"
+
+msgid "inspect complete"
+msgstr "検査完了"
+
+msgid "container warning"
+msgstr "コンテナに警告あり"
+
+msgid "metadata parse failed"
+msgstr "メタデータの解析失敗"
+
+msgid "metadata over limit"
+msgstr "メタデータが上限超過"
+
+msgid "metadata unverified"
+msgstr "メタデータ未検証"
+
+msgid "unsupported or not checked"
+msgstr "非対応または未検査"
+
+msgid "decode or structure failure"
+msgstr "デコードまたは構造の異常"
+
+msgid "cancelled"
+msgstr "キャンセル済み"
+
+msgid "deadline"
+msgstr "制限時間超過"
+
+msgid "resource limit"
+msgstr "リソース上限超過"
+
+msgid "run error"
+msgstr "実行エラー"
+
+msgid "{} bytes"
+msgstr "{} バイト"
+
+msgid "decode {}"
+msgstr "デコード {}"
+
+msgid "Cancelled"
+msgstr "キャンセル済み"
+
+msgid "The analysis was cancelled."
+msgstr "分析をキャンセルしました。"
+
+msgid "This image ({}) is too large to view. The result and the report export are not affected."
+msgstr "この画像（{}）は大きすぎて表示できません。結果とレポートのエクスポートには影響しません。"
+
+msgid "inspect mode"
+msgstr "単独検査モード"
+
+msgid "no colour information"
+msgstr "色情報なし"
+
+msgid "sRGB (WebP default)"
+msgstr "sRGB（WebP の既定値）"
+
+msgid "JPEG XL colour enum"
+msgstr "JPEG XL の色列挙値"
+
+msgid "{} (JPEG XL colour enum)"
+msgstr "{}（JPEG XL の色列挙値）"
+
+msgid "sRGB (sRGB chunk)"
+msgstr "sRGB（sRGB チャンク）"
+
+msgid "partial colour information ({})"
+msgstr "部分的な色情報（{}）"
+
+msgid "CICP {}"
+msgstr "CICP {}"
+
+msgid "embedded ICC profile"
+msgstr "埋め込み ICC プロファイル"
+
+msgid "unreadable ICC profile"
+msgstr "読み取れない ICC プロファイル"
+
+msgid "TIFF colorimetry tags"
+msgstr "TIFF の測色タグ"
+
+msgid "Pixel identical"
+msgstr "ピクセル一致"
+
+msgid "Every sample is identical. The two files describe their colour differently, so the tool cannot prove the colours are the same."
+msgstr "すべてのサンプルが同じです。2 つのファイルは色の記述方法が異なるため、色が同じであることは証明できません。"
+
+msgid "Colour source: original is {}; output is {}."
+msgstr "色の情報源：元ファイルは「{}」、出力は「{}」。"
+
+msgid "This run used the suggested memory limit: job_commit_mib = {} MiB."
+msgstr "今回は推奨のメモリ上限を使用しました：job_commit_mib = {} MiB。"
+
+msgid "Re-analyze with the suggested value ({} MiB)"
+msgstr "推奨値（{} MiB）で再分析"
+
+msgid "More than the memory available now ({} MiB). The analysis may fail or slow down the computer."
+msgstr "現在使用可能なメモリ（{} MiB）を超えています。分析が失敗するか、コンピューターが遅くなる可能性があります。"

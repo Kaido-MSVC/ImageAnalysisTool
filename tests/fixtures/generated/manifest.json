@@ -1,0 +1,245 @@
+[
+ {
+  "name": "png_rgb16",
+  "file": "png_rgb16.png",
+  "expect": "ok",
+  "note": "16-bit RGB, low byte varies independently of high byte",
+  "truth": "png_rgb16.truth"
+ },
+ {
+  "name": "png_rgb16_lsb",
+  "file": "png_rgb16_lsb.png",
+  "expect": "ok",
+  "note": "png_rgb16 with 1 LSB changed at last pixel/channel",
+  "truth": "png_rgb16_lsb.truth"
+ },
+ {
+  "name": "png_rgba8_hidden",
+  "file": "png_rgba8_hidden.png",
+  "expect": "ok",
+  "note": "A=0 pixels keep distinct RGB",
+  "truth": "png_rgba8_hidden.truth"
+ },
+ {
+  "name": "png_pal4_trns",
+  "file": "png_pal4_trns.png",
+  "expect": "ok",
+  "note": "4-bit palette + tRNS expanded to RGBA8 by explicit rule",
+  "truth": "png_pal4_trns.truth"
+ },
+ {
+  "name": "png_gray2",
+  "file": "png_gray2.png",
+  "expect": "ok",
+  "note": "2-bit gray native codes 0..3",
+  "truth": "png_gray2.truth"
+ },
+ {
+  "name": "png_gray1",
+  "file": "png_gray1.png",
+  "expect": "ok",
+  "note": "1-bit gray native codes 0..1",
+  "truth": "png_gray1.truth"
+ },
+ {
+  "name": "png_gray16_trns",
+  "file": "png_gray16_trns.png",
+  "expect": "ok",
+  "note": "16-bit gray + tRNS key expanded to GA16",
+  "truth": "png_gray16_trns.truth"
+ },
+ {
+  "name": "png_rgb8_trns",
+  "file": "png_rgb8_trns.png",
+  "expect": "ok",
+  "note": "RGB8 + tRNS key expanded to RGBA8",
+  "truth": "png_rgb8_trns.truth"
+ },
+ {
+  "name": "png_trunc_idat",
+  "file": "png_trunc_idat.png",
+  "expect": "decode_error",
+  "note": "file cut in the middle of IDAT",
+  "truth": "png_trunc_idat.truth"
+ },
+ {
+  "name": "png_no_iend",
+  "file": "png_no_iend.png",
+  "expect": "decode_error",
+  "note": "IEND chunk missing (file ends after IDAT)",
+  "truth": "png_no_iend.truth"
+ },
+ {
+  "name": "png_trunc_iend",
+  "file": "png_trunc_iend.png",
+  "expect": "decode_error",
+  "note": "file cut inside IEND",
+  "truth": "png_trunc_iend.truth"
+ },
+ {
+  "name": "png_crc_idat",
+  "file": "png_crc_idat.png",
+  "expect": "decode_error",
+  "note": "IDAT CRC wrong",
+  "truth": "png_crc_idat.truth"
+ },
+ {
+  "name": "png_crc_text_after_idat",
+  "file": "png_crc_text_after_idat.png",
+  "expect": "decode_error",
+  "note": "ancillary tEXt after IDAT with wrong CRC",
+  "truth": "png_crc_text_after_idat.truth"
+ },
+ {
+  "name": "png_trailing",
+  "file": "png_trailing.png",
+  "expect": "ok_trailing",
+  "note": "8 bytes after IEND",
+  "truth": "png_trailing.truth"
+ },
+ {
+  "name": "png_ztxt_trunc_after_idat",
+  "file": "png_ztxt_trunc_after_idat.png",
+  "expect": "metadata_error",
+  "note": "zTXt after IDAT with truncated deflate stream (CVE-2026-46675 path)",
+  "truth": "png_ztxt_trunc_after_idat.truth"
+ },
+ {
+  "name": "png_bad_adler",
+  "file": "png_bad_adler.png",
+  "expect": "decode_error",
+  "note": "zlib Adler-32 wrong",
+  "truth": "png_bad_adler.truth"
+ },
+ {
+  "name": "png_split_idat",
+  "file": "png_split_idat.png",
+  "expect": "ok",
+  "note": "IDAT split into 7-byte chunks",
+  "truth": "png_split_idat.truth"
+ },
+ {
+  "name": "png_interlaced",
+  "file": "png_interlaced.png",
+  "expect": "unsupported",
+  "note": "Adam7 flag set (stage 1 rejects interlaced)"
+ },
+ {
+  "name": "tif_rgb16_le_strip_none",
+  "file": "tif_rgb16_le_strip_none.tif",
+  "expect": "ok",
+  "note": "bo=<, comp=none, rows_per_strip=5",
+  "truth": "tif_rgb16_le_strip_none.truth"
+ },
+ {
+  "name": "tif_rgb16_be_strip_none",
+  "file": "tif_rgb16_be_strip_none.tif",
+  "expect": "ok",
+  "note": "bo=>, comp=none, rows_per_strip=5",
+  "truth": "tif_rgb16_be_strip_none.truth"
+ },
+ {
+  "name": "tif_rgb16_le_strip_lzw",
+  "file": "tif_rgb16_le_strip_lzw.tif",
+  "expect": "ok",
+  "note": "bo=<, comp=lzw, rows_per_strip=4",
+  "truth": "tif_rgb16_le_strip_lzw.truth"
+ },
+ {
+  "name": "tif_rgb16_be_strip_deflate",
+  "file": "tif_rgb16_be_strip_deflate.tif",
+  "expect": "ok",
+  "note": "bo=>, comp=deflate, rows_per_strip=7",
+  "truth": "tif_rgb16_be_strip_deflate.truth"
+ },
+ {
+  "name": "tif_rgb8_le_strip_packbits",
+  "file": "tif_rgb8_le_strip_packbits.tif",
+  "expect": "ok",
+  "note": "bo=<, comp=packbits, rows_per_strip=3",
+  "truth": "tif_rgb8_le_strip_packbits.truth"
+ },
+ {
+  "name": "tif_gray16_be_tile_none",
+  "file": "tif_gray16_be_tile_none.tif",
+  "expect": "ok",
+  "note": "bo=>, comp=none, tile=(16, 16)",
+  "truth": "tif_gray16_be_tile_none.truth"
+ },
+ {
+  "name": "tif_rgb16_le_tile_deflate",
+  "file": "tif_rgb16_le_tile_deflate.tif",
+  "expect": "ok",
+  "note": "bo=<, comp=deflate, tile=(16, 16)",
+  "truth": "tif_rgb16_le_tile_deflate.truth"
+ },
+ {
+  "name": "tif_rgba8_le_tile_lzw",
+  "file": "tif_rgba8_le_tile_lzw.tif",
+  "expect": "ok",
+  "note": "bo=<, comp=lzw, tile=(16, 16)",
+  "truth": "tif_rgba8_le_tile_lzw.truth"
+ },
+ {
+  "name": "tif_gray8_le_strip_none",
+  "file": "tif_gray8_le_strip_none.tif",
+  "expect": "ok",
+  "note": "bo=<, comp=none, rows_per_strip=18",
+  "truth": "tif_gray8_le_strip_none.truth"
+ },
+ {
+  "name": "btf_rgb16_le_strip_deflate",
+  "file": "btf_rgb16_le_strip_deflate.tif",
+  "expect": "ok",
+  "note": "bo=<, comp=deflate, rows_per_strip=6, big=True",
+  "truth": "btf_rgb16_le_strip_deflate.truth"
+ },
+ {
+  "name": "btf_rgb16_be_tile_none",
+  "file": "btf_rgb16_be_tile_none.tif",
+  "expect": "ok",
+  "note": "bo=>, comp=none, tile=(16, 16), big=True",
+  "truth": "btf_rgb16_be_tile_none.truth"
+ },
+ {
+  "name": "tif_trunc_strip_data",
+  "file": "tif_trunc_strip_data.tif",
+  "expect": "decode_error",
+  "note": "IFD intact, last strip cut by 100 bytes",
+  "truth": "tif_trunc_strip_data.truth"
+ },
+ {
+  "name": "tif_trunc_deflate_strip",
+  "file": "tif_trunc_deflate_strip.tif",
+  "expect": "decode_error",
+  "note": "IFD intact, last deflate strip cut by 40 bytes",
+  "truth": "tif_trunc_deflate_strip.truth"
+ },
+ {
+  "name": "tif_trunc_tile",
+  "file": "tif_trunc_tile.tif",
+  "expect": "decode_error",
+  "note": "IFD intact, last tile cut by 64 bytes",
+  "truth": "tif_trunc_tile.truth"
+ },
+ {
+  "name": "tif_bad_strip_offset",
+  "file": "tif_bad_strip_offset.tif",
+  "expect": "decode_error",
+  "note": "strip offsets point past EOF",
+  "truth": "tif_bad_strip_offset.truth"
+ },
+ {
+  "name": "tif_trunc_no_ifd",
+  "file": "tif_trunc_no_ifd.tif",
+  "expect": "open_error",
+  "note": "file cut before the IFD"
+ },
+ {
+  "name": "tif_deflate_big_strip",
+  "file": "tif_deflate_big_strip.tif",
+  "expect": "ok",
+  "note": "one 24 KiB deflate strip; used to trigger libtiff memory limits",
+  "truth": "tif_deflate_big_strip.truth"
+ }
+]

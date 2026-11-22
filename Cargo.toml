@@ -1,0 +1,126 @@
+[workspace]
+resolver = "3"
+members = ["crates/iat-av1", "crates/iat-core", "crates/iat-cli", "crates/iat-gui", "crates/iat-worker"]
+
+[workspace.package]
+# D-R10：`iat --version` 必須恰為 `iat X.Y.Z`（IMB-C 要求 ≥ 0.5.1），不可有預發布字尾
+version = "2.0.0"
+edition = "2024"
+rust-version = "1.100"
+license = "MIT"
+authors = ["Kaido-MSVC"]
+publish = false
+
+# 版本變更要同步記在 docs/dependencies.md。
+[workspace.dependencies]
+iat-av1 = { path = "crates/iat-av1" }
+iat-core = { path = "crates/iat-core" }
+# 只放 dev-dependencies：PSD／PSB 的交叉比對（規劃書，D-R16）
+apeireth-image-psd = { version = "2.0.0-rc.5", default-features = false }
+image-webp = "0.2.4"
+# 階段 5：JPEG XL 解碼（jxl-rs，D-R18）
+jxl = "0.8.0"
+# 階段 6：AV1 解碼（rav1d，D-R09）；不編入組合語言，只開 8／16 位元
+rav1d = { version = "1.1.0", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
+crc32fast = "1.5.5"
+miniz_oxide = "0.8.9"
+png = "0.18.1"
+rfd = "0.18.0"
+serde = { version = "1.0.229", features = ["derive"] }
+# float_roundtrip：worker 的報告經過一次 JSON 解析再輸出，浮點數必須原值往返（D-R02）
+serde_json = { version = "1.0.154", features = ["float_roundtrip"] }
+sha2 = "0.11.1"
+# 階段 4：TIFF 的 LZW 解壓（D-R17）
+weezl = "0.1.12"
+# GUI：預設 feature 換成明確清單；繪圖用 FemtoVG（WGPU，純 Rust，D-R14），winit 後端（拖放要接 winit 事件）
+slint = { version = "1.19.0", default-features = false, features = [
+    "std",
+    "compat-1-2",
+    "backend-winit",
+    "renderer-femtovg-wgpu",
+    "accessibility",
+    "unstable-winit-030",
+] }
+slint-build = "1.19.0"
+# 階段 7：三個執行檔的 Windows 資源（圖示與版本資訊），只在 build.rs 用；關掉 toml feature，只多帶 version_check
+winresource = { version = "0.1.34", default-features = false }
+# 介面語言的預設值；Slint 已經依賴同一版
+sys-locale = "0.3.2"
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_Globalization",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Console",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_Security",
+    "Win32_Security_Cryptography",
+    "Win32_System_IO",
+    "Win32_System_JobObjects",
+    "Win32_System_Pipes",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+] }
+
+# 既有設定（unsafe_code、let_underscore_must_use）保留；其餘合併自
+# D:\tools\rust-lints-app.toml（BeautifulRust 應用程式版）。
+[workspace.lints.rust]
+unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "warn"
+missing_debug_implementations = "warn"
+unreachable_pub = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+
+# `let _ = 會失敗的呼叫` 會默默丟掉錯誤；要丟就明說理由。
+let_underscore_must_use = "warn"
+
+# Panic
+unwrap_used = "warn"
+expect_used = "allow"
+panic_in_result_fn = "warn"
+missing_assert_message = "warn"
+
+# 抑制要附理由
+allow_attributes = "warn"
+allow_attributes_without_reason = "warn"
+
+# unsafe
+undocumented_unsafe_blocks = "warn"
+multiple_unsafe_ops_per_block = "warn"
+
+# API 形狀
+fn_params_excessive_bools = "warn"
+struct_excessive_bools = "warn"
+clone_on_ref_ptr = "warn"
+redundant_clone = "warn"
+rc_buffer = "warn"
+
+# 慣用寫法
+string_add = "warn"
+wildcard_imports = "warn"
+
+# 除錯殘留
+dbg_macro = "warn"
+todo = "warn"
+
+# 可能遺失資訊的轉型
+# 影像運算大量使用 `as`；本專案只靠下面三個 cast_* 抓真正會遺失資訊的轉型
+as_conversions = "allow"
+cast_possible_truncation = "warn"
+cast_sign_loss = "warn"
+
+# pedantic 中雜訊較多的項目
+module_name_repetitions = "allow"
+# 應用程式，不對外發佈 API
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+module_inception = "allow"
+enum_glob_use = "allow"
+
+[profile.release]
+lto = true
+codegen-units = 1

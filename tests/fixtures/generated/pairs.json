@@ -1,0 +1,2519 @@
+{
+ "pairs": [
+  {
+   "name": "equal_other_container",
+   "original": "s1_rgb16_srgb.png",
+   "output": "s1_rgb16_srgb_split.png",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "same samples, IDAT split differently",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "one_lsb_last_pixel",
+   "original": "s1_rgb16_srgb.png",
+   "output": "s1_rgb16_srgb_lsb.png",
+   "exit": 1,
+   "strict": "mismatch",
+   "codes": [
+    "samples_differ"
+   ],
+   "note": "last pixel, channel B, 1 LSB",
+   "check": {
+    "pixels_differing": "1",
+    "first": [
+     4,
+     2
+    ],
+    "channel": "B",
+    "max_abs": 1
+   },
+   "args": []
+  },
+  {
+   "name": "low_byte_only_16bit",
+   "original": "s1_rgb16_srgb.png",
+   "output": "s1_rgb16_srgb_lowbyte.png",
+   "exit": 1,
+   "strict": "mismatch",
+   "codes": [
+    "samples_differ"
+   ],
+   "note": "only low bytes differ; an 8-bit path would miss this",
+   "check": {
+    "max_abs_below": 256
+   },
+   "args": []
+  },
+  {
+   "name": "hidden_rgb_under_alpha0",
+   "original": "s1_rgba8_srgb.png",
+   "output": "s1_rgba8_srgb_hidden.png",
+   "exit": 1,
+   "strict": "mismatch",
+   "codes": [
+    "samples_differ"
+   ],
+   "note": "RGB under A=0 changed",
+   "check": {
+    "first": [
+     0,
+     0
+    ],
+    "channel": "R"
+   },
+   "args": []
+  },
+  {
+   "name": "alpha_changed",
+   "original": "s1_rgba8_srgb.png",
+   "output": "s1_rgba8_srgb_alpha.png",
+   "exit": 1,
+   "strict": "mismatch",
+   "codes": [
+    "samples_differ"
+   ],
+   "note": "alpha 255->254 at (1,0)",
+   "check": {
+    "first": [
+     1,
+     0
+    ],
+    "channel": "A"
+   },
+   "args": []
+  },
+  {
+   "name": "icc_equal",
+   "original": "s1_rgb16_icc1.png",
+   "output": "s1_rgb16_icc1_b.png",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "icc_missing_on_output",
+   "original": "s1_rgb16_icc1.png",
+   "output": "s1_rgb16_noicc.png",
+   "exit": 2,
+   "strict": "indeterminate",
+   "codes": [
+    "icc_missing_on_output"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "icc_differs",
+   "original": "s1_rgb16_icc1.png",
+   "output": "s1_rgb16_icc2.png",
+   "exit": 2,
+   "strict": "indeterminate",
+   "codes": [
+    "icc_differs"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "icc_plus_low_priority_chrm",
+   "original": "s1_rgb16_icc1.png",
+   "output": "s1_rgb16_icc1_chrm.png",
+   "exit": 0,
+   "strict": "match",
+   "codes": [
+    "low_priority_color_signal_differs"
+   ],
+   "note": "D4: iCCP outranks cHRM",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "no_color_both",
+   "original": "png_rgb16.png",
+   "output": "s1_rgb16_plain_copy.png",
+   "exit": 2,
+   "strict": "indeterminate",
+   "codes": [
+    "color_unknown"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "cicp_equal",
+   "original": "s1_rgb16_cicp.png",
+   "output": "s1_rgb16_cicp_b.png",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "rgb_vs_rgba_opaque",
+   "original": "s1_rgb8_srgb.png",
+   "output": "s1_rgba8_opaque.png",
+   "exit": 0,
+   "strict": "match",
+   "codes": [
+    "alpha_channel_added"
+   ],
+   "note": "D3",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "rgb_vs_rgba_not_opaque",
+   "original": "s1_rgb8_srgb.png",
+   "output": "s1_rgba8_254.png",
+   "exit": 1,
+   "strict": "mismatch",
+   "codes": [
+    "samples_differ"
+   ],
+   "note": "D3: one alpha below max",
+   "check": {
+    "channel": "A"
+   },
+   "args": []
+  },
+  {
+   "name": "bit_depth_16_to_8",
+   "original": "s1_rgb16_srgb.png",
+   "output": "s1_rgb8_srgb.png",
+   "exit": 1,
+   "strict": "mismatch",
+   "codes": [
+    "bit_depth_changed"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "gray_vs_rgb",
+   "original": "s1_gray8_srgb.png",
+   "output": "s1_rgb8_from_gray.png",
+   "exit": 1,
+   "strict": "mismatch",
+   "codes": [
+    "sample_model_changed"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "geometry_differs",
+   "original": "s1_rgb16_srgb.png",
+   "output": "s1_rgb16_3x5.png",
+   "exit": 1,
+   "strict": "mismatch",
+   "codes": [
+    "geometry_differs"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "orientation_differs",
+   "original": "s1_rgb16_srgb.png",
+   "output": "s1_rgb16_exif6.png",
+   "exit": 1,
+   "strict": "mismatch",
+   "codes": [
+    "orientation_differs"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "truncated_output",
+   "original": "s1_rgb16_srgb.png",
+   "output": "s1_trunc.png",
+   "exit": 3,
+   "strict": "not_evaluated",
+   "codes": [
+    "truncated"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "crc_error_output",
+   "original": "s1_rgb16_srgb.png",
+   "output": "s1_crc.png",
+   "exit": 3,
+   "strict": "not_evaluated",
+   "codes": [
+    "crc_error"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "missing_iend_output",
+   "original": "s1_rgb16_srgb.png",
+   "output": "s1_noiend.png",
+   "exit": 3,
+   "strict": "not_evaluated",
+   "codes": [
+    "missing_end_marker"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "interlace_flag_without_adam7_data",
+   "original": "s1_rgb16_srgb.png",
+   "output": "s1_interlaced.png",
+   "exit": 3,
+   "strict": "not_evaluated",
+   "codes": [
+    "decode_failed"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "apng_output",
+   "original": "s1_rgb16_srgb.png",
+   "output": "s1_apng.png",
+   "exit": 2,
+   "strict": "not_evaluated",
+   "codes": [
+    "animation_not_supported"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "trailing_data_output",
+   "original": "s1_rgb16_srgb.png",
+   "output": "s1_trailing.png",
+   "exit": 2,
+   "strict": "indeterminate",
+   "codes": [
+    "trailing_data"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "broken_ztxt_output",
+   "original": "s1_rgb16_srgb.png",
+   "output": "s1_ztxt_broken.png",
+   "exit": 0,
+   "strict": "match",
+   "codes": [
+    "metadata_parse_failed"
+   ],
+   "note": "metadata failure is reported but does not change sample/strict result",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "gray2_vs_gray8",
+   "original": "s1_gray2.png",
+   "output": "s1_gray8_codes.png",
+   "exit": 1,
+   "strict": "mismatch",
+   "codes": [
+    "bit_depth_changed"
+   ],
+   "note": "native low-bit codes are not rescaled",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "palette_trns_vs_rgba",
+   "original": "s1_pal4_trns_srgb.png",
+   "output": "s1_rgba8_from_pal.png",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "gray16_trns_vs_ga16",
+   "original": "s1_gray16_trns_srgb.png",
+   "output": "s1_ga16_srgb.png",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "gray1_one_code_differs",
+   "original": "s4_gray1.png",
+   "output": "s4_gray1_changed.png",
+   "exit": 1,
+   "strict": "mismatch",
+   "codes": [
+    "samples_differ"
+   ],
+   "note": "last pixel, native code +-1",
+   "check": {
+    "pixels_differing": "1",
+    "first": [
+     10,
+     2
+    ],
+    "max_abs": 1
+   },
+   "args": []
+  },
+  {
+   "name": "gray4_one_code_differs",
+   "original": "s4_gray4.png",
+   "output": "s4_gray4_changed.png",
+   "exit": 1,
+   "strict": "mismatch",
+   "codes": [
+    "samples_differ"
+   ],
+   "note": "last pixel, native code +-1",
+   "check": {
+    "pixels_differing": "1",
+    "first": [
+     8,
+     2
+    ],
+    "max_abs": 1
+   },
+   "args": []
+  },
+  {
+   "name": "rgb8_trns_vs_rgba8",
+   "original": "s4_rgb8_trns.png",
+   "output": "s4_rgba8_from_key.png",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "adler32_error_output",
+   "original": "s1_rgb16_srgb.png",
+   "output": "s4_bad_adler.png",
+   "exit": 3,
+   "strict": "not_evaluated",
+   "codes": [
+    "decode_failed"
+   ],
+   "note": "zlib Adler-32 mismatch (deflate data itself intact)",
+   "check": {
+    "message_contains": "incorrect data check"
+   },
+   "args": []
+  },
+  {
+   "name": "ancillary_crc_after_idat_output",
+   "original": "s1_rgb16_srgb.png",
+   "output": "s4_text_crc_after_idat.png",
+   "exit": 3,
+   "strict": "not_evaluated",
+   "codes": [
+    "crc_error"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "cicp_outranks_conflicting_iccp",
+   "original": "s1_rgb16_cicp.png",
+   "output": "s4_rgb16_cicp_plus_other_iccp.png",
+   "exit": 0,
+   "strict": "match",
+   "codes": [
+    "low_priority_color_signal_differs"
+   ],
+   "note": "D4: cICP > iCCP; the iCCP difference is a warning only",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "png_exif_over_limit_orientation_differs",
+   "original": "s4_rgb16_exif1_over_1mib.png",
+   "output": "s4_rgb16_exif6_over_1mib.png",
+   "exit": 2,
+   "strict": "indeterminate",
+   "codes": [
+    "orientation_unknown"
+   ],
+   "note": "D21",
+   "check": {
+    "orientation_source": "unknown"
+   },
+   "args": [
+    "--limits",
+    "metadata_item_mib=1"
+   ]
+  },
+  {
+   "name": "webp_exif_over_limit_orientation_differs",
+   "original": "s4_webp_exif1_over_1mib.webp",
+   "output": "s4_webp_exif6_over_1mib.webp",
+   "exit": 2,
+   "strict": "indeterminate",
+   "codes": [
+    "orientation_unknown"
+   ],
+   "note": "D21",
+   "check": {
+    "orientation_source": "unknown"
+   },
+   "args": [
+    "--limits",
+    "metadata_item_mib=1"
+   ]
+  },
+  {
+   "name": "adam7_vs_plain",
+   "original": "s1_rgb16_srgb.png",
+   "output": "s2_adam7_rgb16_srgb.png",
+   "exit": 0,
+   "strict": "match",
+   "codes": [
+    "interlace_differs"
+   ],
+   "note": "5x3: passes 3 and 7 empty",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "adam7_one_lsb_last_pixel",
+   "original": "s1_rgb16_srgb.png",
+   "output": "s2_adam7_rgb16_lsb.png",
+   "exit": 1,
+   "strict": "mismatch",
+   "codes": [
+    "samples_differ"
+   ],
+   "note": "last pixel (pass 5), channel B, 1 LSB",
+   "check": {
+    "pixels_differing": "1",
+    "first": [
+     4,
+     2
+    ],
+    "channel": "B",
+    "max_abs": 1
+   },
+   "args": []
+  },
+  {
+   "name": "adam7_all_passes_vs_plain",
+   "original": "s2_rgba16_37x29_plain.png",
+   "output": "s2_rgba16_37x29_adam7.png",
+   "exit": 0,
+   "strict": "match",
+   "codes": [
+    "interlace_differs"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "adam7_vs_adam7",
+   "original": "s2_rgba16_37x29_adam7.png",
+   "output": "s2_rgba16_37x29_adam7_split.png",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "both sides through temp storage",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "adam7_diffs_in_four_passes",
+   "original": "s2_rgba16_37x29_plain.png",
+   "output": "s2_rgba16_37x29_adam7_diff.png",
+   "exit": 1,
+   "strict": "mismatch",
+   "codes": [
+    "samples_differ"
+   ],
+   "note": "coordinates must map back from each pass",
+   "check": {
+    "pixels_differing": "4",
+    "coords": [
+     [
+      4,
+      0
+     ],
+     [
+      1,
+      2
+     ],
+     [
+      3,
+      5
+     ],
+     [
+      36,
+      28
+     ]
+    ]
+   },
+   "args": []
+  },
+  {
+   "name": "adam7_1x1",
+   "original": "s2_gray8_1x1_plain.png",
+   "output": "s2_gray8_1x1_adam7.png",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "adam7_gray2",
+   "original": "s1_gray2.png",
+   "output": "s2_gray2_adam7.png",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "adam7_palette_trns_vs_rgba",
+   "original": "s2_pal4_trns_adam7.png",
+   "output": "s1_rgba8_from_pal.png",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "adam7_truncated_output",
+   "original": "s2_rgba16_37x29_plain.png",
+   "output": "s2_adam7_trunc.png",
+   "exit": 3,
+   "strict": "not_evaluated",
+   "codes": [
+    "truncated"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "png_vs_tif_rgb16_le_strip_none",
+   "original": "s2_rgb16_icc1.png",
+   "output": "s2_tif_rgb16_le_strip_none.tif",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "cross-format 16-bit, same ICC bytes",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "png_vs_tif_rgb16_be_strip_lzw",
+   "original": "s2_rgb16_icc1.png",
+   "output": "s2_tif_rgb16_be_strip_lzw.tif",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "cross-format 16-bit, same ICC bytes",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "png_vs_tif_rgb16_le_tile_deflate",
+   "original": "s2_rgb16_icc1.png",
+   "output": "s2_tif_rgb16_le_tile_deflate.tif",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "cross-format 16-bit, same ICC bytes",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "png_vs_tif_rgb16_be_tile_none",
+   "original": "s2_rgb16_icc1.png",
+   "output": "s2_tif_rgb16_be_tile_none.tif",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "cross-format 16-bit, same ICC bytes",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "png_vs_btf_rgb16_le_strip_packbits",
+   "original": "s2_rgb16_icc1.png",
+   "output": "s2_btf_rgb16_le_strip_packbits.tif",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "cross-format 16-bit, same ICC bytes",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "png_vs_btf_rgb16_be_tile_deflate",
+   "original": "s2_rgb16_icc1.png",
+   "output": "s2_btf_rgb16_be_tile_deflate.tif",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "cross-format 16-bit, same ICC bytes",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "tiff_tile_vs_strip",
+   "original": "s2_tif_rgb16_le_tile_deflate.tif",
+   "output": "s2_tif_rgb16_be_strip_lzw.tif",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "different byte order, layout and compression",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "adam7_png_vs_bigtiff_tile",
+   "original": "s2_rgb16_icc1_adam7.png",
+   "output": "s2_btf_rgb16_be_tile_deflate.tif",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "TIFF has no interlace field, so no interlace_differs",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "png_vs_tif_predictor2_le_deflate",
+   "original": "s2_rgb16_icc1.png",
+   "output": "s2_tif_rgb16_pred2_le_deflate.tif",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "16-bit horizontal differencing undone by libtiff",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "png_vs_tif_predictor2_be_lzw",
+   "original": "s2_rgb16_icc1.png",
+   "output": "s2_tif_rgb16_pred2_be_lzw.tif",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "big-endian 16-bit differencing",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "png_vs_tif_deflate_32946",
+   "original": "s2_rgb16_icc1.png",
+   "output": "s2_tif_rgb16_deflate32946.tif",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "Compression 32946 (old Adobe Deflate code)",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "tiff_tile_last_pixel_lsb",
+   "original": "s2_rgb16_icc1.png",
+   "output": "s2_tif_rgb16_tile_lsb.tif",
+   "exit": 1,
+   "strict": "mismatch",
+   "codes": [
+    "samples_differ"
+   ],
+   "note": "padding must not hide or create differences",
+   "check": {
+    "pixels_differing": "1",
+    "first": [
+     36,
+     28
+    ],
+    "channel": "B",
+    "max_abs": 1
+   },
+   "args": []
+  },
+  {
+   "name": "tiff_low_byte_only_be",
+   "original": "s2_rgb16_icc1.png",
+   "output": "s2_tif_rgb16_be_lowbyte.tif",
+   "exit": 1,
+   "strict": "mismatch",
+   "codes": [
+    "samples_differ"
+   ],
+   "note": "byte-swapped 16-bit: only low bytes differ",
+   "check": {
+    "max_abs_below": 256
+   },
+   "args": []
+  },
+  {
+   "name": "png_srgb_vs_tiff_icc_unverified",
+   "original": "s2_rgb16_srgb.png",
+   "output": "s2_tif_rgb16_le_strip_none.tif",
+   "exit": 2,
+   "strict": "indeterminate",
+   "codes": [
+    "color_unverified"
+   ],
+   "note": "sRGB chunk vs embedded ICC: equivalence cannot be proven from bytes",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "tiff_no_icc_both",
+   "original": "s2_tif_rgb16_noicc.tif",
+   "output": "s2_tif_rgb16_noicc_tile.tif",
+   "exit": 2,
+   "strict": "indeterminate",
+   "codes": [
+    "color_unknown"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "png_icc_vs_tiff_no_icc",
+   "original": "s2_rgb16_icc1.png",
+   "output": "s2_tif_rgb16_noicc.tif",
+   "exit": 2,
+   "strict": "indeterminate",
+   "codes": [
+    "icc_missing_on_output"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "tiff_miniswhite_vs_png_gray",
+   "original": "s2_tif_gray8_miniswhite.tif",
+   "output": "s2_gray8_iccgray.png",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "MinIsWhite inverted to MinIsBlack at the same depth",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "tiff_rgba8_straight_vs_png",
+   "original": "s2_rgba8_icc1.png",
+   "output": "s2_tif_rgba8_tile_lzw.tif",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "A=0 pixels carry distinct RGB in both files",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "tiff_hidden_rgb_under_alpha0",
+   "original": "s2_rgba8_icc1.png",
+   "output": "s2_tif_rgba8_hidden.tif",
+   "exit": 1,
+   "strict": "mismatch",
+   "codes": [
+    "samples_differ"
+   ],
+   "note": "",
+   "check": {
+    "first": [
+     0,
+     0
+    ],
+    "channel": "R"
+   },
+   "args": []
+  },
+  {
+   "name": "tiff_associated_alpha",
+   "original": "s2_tif_rgba8_assoc.tif",
+   "output": "s2_tif_rgba8_assoc.tif",
+   "exit": 2,
+   "strict": "indeterminate",
+   "codes": [],
+   "note": "associated alpha never gives a strict match",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "tiff_unspecified_alpha",
+   "original": "s2_rgba8_icc1.png",
+   "output": "s2_tif_rgba8_extra0.tif",
+   "exit": 2,
+   "strict": "indeterminate",
+   "codes": [],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "tiff_orientation_differs",
+   "original": "s2_rgb16_icc1.png",
+   "output": "s2_tif_rgb16_orient6.tif",
+   "exit": 1,
+   "strict": "mismatch",
+   "codes": [
+    "orientation_differs"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "tiff_jpeg_compression_not_checked",
+   "original": "s2_rgb16_icc1.png",
+   "output": "s2_tif_rgb8_jpeg_declared.tif",
+   "exit": 2,
+   "strict": "not_evaluated",
+   "codes": [
+    "compression_not_supported"
+   ],
+   "note": "JPEG-in-TIFF (code 7) is outside the supported set",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "tiff_lzma_compression_not_checked",
+   "original": "s2_rgb16_icc1.png",
+   "output": "s2_tif_rgb16_lzma_declared.tif",
+   "exit": 2,
+   "strict": "not_evaluated",
+   "codes": [
+    "compression_not_supported"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "tiff_multipage",
+   "original": "s2_rgb16_icc1.png",
+   "output": "s2_tif_rgb16_two_pages.tif",
+   "exit": 2,
+   "strict": "not_evaluated",
+   "codes": [
+    "multi_image_not_supported"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "tiff_separate_planes",
+   "original": "s2_rgb16_icc1.png",
+   "output": "s2_tif_rgb16_planar2.tif",
+   "exit": 2,
+   "strict": "not_evaluated",
+   "codes": [
+    "unsupported_sample_model"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "tiff_float_samples",
+   "original": "s2_rgb16_icc1.png",
+   "output": "s2_tif_rgb16_float.tif",
+   "exit": 2,
+   "strict": "not_evaluated",
+   "codes": [
+    "unsupported_sample_model"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "tiff_subifd",
+   "original": "s2_rgb16_icc1.png",
+   "output": "s4_tif_rgb16_subifd.tif",
+   "exit": 2,
+   "strict": "not_evaluated",
+   "codes": [
+    "multi_image_not_supported"
+   ],
+   "note": "SubIFDs tag 330 present",
+   "check": {
+    "message_contains": "SubIFDs"
+   },
+   "args": []
+  },
+  {
+   "name": "tiff_signed_samples",
+   "original": "s2_rgb16_icc1.png",
+   "output": "s4_tif_rgb16_signed.tif",
+   "exit": 2,
+   "strict": "not_evaluated",
+   "codes": [
+    "unsupported_sample_model"
+   ],
+   "note": "",
+   "check": {
+    "message_contains": "SampleFormat 2"
+   },
+   "args": []
+  },
+  {
+   "name": "tiff_cmyk",
+   "original": "s2_rgb16_icc1.png",
+   "output": "s4_tif_cmyk16.tif",
+   "exit": 2,
+   "strict": "not_evaluated",
+   "codes": [
+    "unsupported_sample_model"
+   ],
+   "note": "Photometric 5 (separated / CMYK)",
+   "check": {
+    "message_contains": "Photometric 5"
+   },
+   "args": []
+  },
+  {
+   "name": "tiff_ycbcr",
+   "original": "s2_rgb16_icc1.png",
+   "output": "s4_tif_ycbcr16.tif",
+   "exit": 2,
+   "strict": "not_evaluated",
+   "codes": [
+    "unsupported_sample_model"
+   ],
+   "note": "Photometric 6 (YCbCr)",
+   "check": {
+    "message_contains": "Photometric 6"
+   },
+   "args": []
+  },
+  {
+   "name": "tiff_non_alpha_extra_sample",
+   "original": "s2_rgb16_icc1.png",
+   "output": "s4_tif_rgba16_plus_extra.tif",
+   "exit": 2,
+   "strict": "not_evaluated",
+   "codes": [
+    "unsupported_sample_model"
+   ],
+   "note": "RGB + alpha + one unspecified extra sample (SamplesPerPixel 5)",
+   "check": {
+    "message_contains": "SamplesPerPixel 5"
+   },
+   "args": []
+  },
+  {
+   "name": "tiff_truncated_strip",
+   "original": "s2_rgb16_icc1.png",
+   "output": "s2_tif_trunc_strip.tif",
+   "exit": 3,
+   "strict": "not_evaluated",
+   "codes": [
+    "truncated"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "tiff_truncated_tile",
+   "original": "s2_rgb16_icc1.png",
+   "output": "s2_tif_trunc_tile.tif",
+   "exit": 3,
+   "strict": "not_evaluated",
+   "codes": [
+    "truncated"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "tiff_strip_offset_outside",
+   "original": "s2_rgb16_icc1.png",
+   "output": "s2_tif_bad_offset.tif",
+   "exit": 3,
+   "strict": "not_evaluated",
+   "codes": [
+    "structure_error"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "tiff_ifd_missing",
+   "original": "s2_rgb16_icc1.png",
+   "output": "s2_tif_no_ifd.tif",
+   "exit": 3,
+   "strict": "not_evaluated",
+   "codes": [
+    "structure_error"
+   ],
+   "note": "header points to an IFD past the end of the file",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "tiff_dangling_next_ifd",
+   "original": "s2_rgb16_icc1.png",
+   "output": "s2_tif_dangling_next.tif",
+   "exit": 3,
+   "strict": "not_evaluated",
+   "codes": [
+    "structure_error"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "tiff_corrupt_deflate_data",
+   "original": "s2_rgb16_icc1.png",
+   "output": "s2_tif_bad_deflate.tif",
+   "exit": 3,
+   "strict": "not_evaluated",
+   "codes": [
+    "decode_failed"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "jxl_srgb_enum_vs_png_srgb",
+   "original": "s3_rgb16_600x40_srgb.png",
+   "output": "s3_jxl_rgb16_600x40_srgb.jxl",
+   "exit": 0,
+   "strict": "match",
+   "codes": [
+    "rendering_intent_differs"
+   ],
+   "note": "JXL sRGB enum (relative) vs PNG sRGB chunk (perceptual): intent recorded only",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "jxl_effort3_vs_effort7",
+   "original": "s3_jxl_rgb16_600x40_srgb.jxl",
+   "output": "s3_jxl_rgb16_600x40_srgb_e7.jxl",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "two JXL enums: key equality",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "jxl_pq_enum_vs_png_cicp",
+   "original": "s3_jxl_rgb16_pq.jxl",
+   "output": "s3_rgb16_pq_cicp.png",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "PQ enum equals cICP 9/16/0/1",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "jxl_pq_enum_vs_png_same_icc",
+   "original": "s3_jxl_rgb16_pq.jxl",
+   "output": "s3_rgb16_pq_iccp_imbc.png",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "ICC synthesized by libjxl is byte-identical to the IMB-C iCCP",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "jxl_pq_enum_vs_png_other_icc",
+   "original": "s3_jxl_rgb16_pq.jxl",
+   "output": "s3_rgb16_pq_iccp_other.png",
+   "exit": 2,
+   "strict": "indeterminate",
+   "codes": [
+    "color_unverified"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "jxl_embedded_icc_rgba16_vs_png",
+   "original": "s3_rgba16_iccp_imbc.png",
+   "output": "s3_jxl_rgba16_icc.jxl",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "embedded ICC kept byte for byte; A=0 pixels keep RGB",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "jxl_gray8_srgb_vs_png",
+   "original": "s3_gray8_srgb.png",
+   "output": "s3_jxl_gray8_srgb.jxl",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "jxl_rgba8_hidden_rgb_vs_png",
+   "original": "s3_rgba8_srgb.png",
+   "output": "s3_jxl_rgba8_srgb.jxl",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "RGB under A=0 is compared",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "jxl_two_layers_vs_composite_png",
+   "original": "s3_rgb16_layers_composite.png",
+   "output": "s3_jxl_rgb16_two_layers.jxl",
+   "exit": 0,
+   "strict": "match",
+   "codes": [
+    "layered_image",
+    "rendering_intent_differs"
+   ],
+   "note": "REPLACE layer 20x16 at (10,8), composited here by hand",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "jxl_one_lsb_last_pixel",
+   "original": "s3_rgb16_600x40_srgb.png",
+   "output": "s3_jxl_rgb16_600x40_lsb.jxl",
+   "exit": 1,
+   "strict": "mismatch",
+   "codes": [
+    "samples_differ"
+   ],
+   "note": "last pixel, channel B, 1 LSB",
+   "check": {
+    "pixels_differing": "1",
+    "first": [
+     599,
+     39
+    ],
+    "channel": "B",
+    "max_abs": 1
+   },
+   "args": []
+  },
+  {
+   "name": "jxl_hidden_rgb_1lsb",
+   "original": "s3_rgba8_srgb.png",
+   "output": "s3_jxl_rgba8_hidden_lsb.jxl",
+   "exit": 1,
+   "strict": "mismatch",
+   "codes": [
+    "samples_differ"
+   ],
+   "note": "",
+   "check": {
+    "pixels_differing": "1",
+    "first": [
+     0,
+     0
+    ],
+    "channel": "R",
+    "max_abs": 1
+   },
+   "args": []
+  },
+  {
+   "name": "jxl_orientation_differs",
+   "original": "s3_rgb16_600x40_srgb.png",
+   "output": "s3_jxl_rgb16_600x40_orient6.jxl",
+   "exit": 1,
+   "strict": "mismatch",
+   "codes": [
+    "orientation_differs"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "jxl_12bit_vs_png_16bit",
+   "original": "s3_rgb16_600x40_srgb.png",
+   "output": "s3_jxl_rgb12_600x40.jxl",
+   "exit": 1,
+   "strict": "mismatch",
+   "codes": [
+    "bit_depth_changed"
+   ],
+   "note": "input scaled to 16-bit full range; libjxl stores 12-bit codes",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "jxl_xyb_lossy",
+   "original": "s3_rgb16_600x40_srgb.png",
+   "output": "s3_jxl_rgb16_lossy_xyb.jxl",
+   "exit": 2,
+   "strict": "not_evaluated",
+   "codes": [
+    "xyb_not_native"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "jxl_animation",
+   "original": "s3_rgb16_600x40_srgb.png",
+   "output": "s3_jxl_rgb16_anim.jxl",
+   "exit": 2,
+   "strict": "not_evaluated",
+   "codes": [
+    "animation_not_supported"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "jxl_float32_samples",
+   "original": "s3_rgba8_srgb.png",
+   "output": "s4_jxl_rgb_float32.jxl",
+   "exit": 2,
+   "strict": "not_evaluated",
+   "codes": [
+    "unsupported_sample_model"
+   ],
+   "note": "codestream declares 32-bit float (exponent 8)",
+   "check": {
+    "message_contains": "floating-point samples"
+   },
+   "args": []
+  },
+  {
+   "name": "jxl_24bit_samples",
+   "original": "s3_rgba8_srgb.png",
+   "output": "s4_jxl_rgb_int24.jxl",
+   "exit": 2,
+   "strict": "not_evaluated",
+   "codes": [
+    "unsupported_sample_model"
+   ],
+   "note": "codestream declares 24-bit unsigned integer",
+   "check": {
+    "message_contains": "24-bit samples"
+   },
+   "args": []
+  },
+  {
+   "name": "jxl_premultiplied_alpha",
+   "original": "s3_jxl_rgba16_premul.jxl",
+   "output": "s3_jxl_rgba16_premul.jxl",
+   "exit": 2,
+   "strict": "indeterminate",
+   "codes": [],
+   "note": "associated alpha never gives a strict match",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "jxl_depth_extra_channel",
+   "original": "s3_rgb16_600x40_srgb.png",
+   "output": "s3_jxl_rgb16_depth.jxl",
+   "exit": 2,
+   "strict": "indeterminate",
+   "codes": [
+    "extra_channel_not_supported"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "jxl_container_jxlc_exif_xml",
+   "original": "s3_rgb16_600x40_srgb.png",
+   "output": "s3_jxl_container_jxlc_meta.jxl",
+   "exit": 0,
+   "strict": "match",
+   "codes": [
+    "rendering_intent_differs"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "jxl_container_jxlp_three_parts",
+   "original": "s3_rgb16_600x40_srgb.png",
+   "output": "s3_jxl_container_jxlp3.jxl",
+   "exit": 0,
+   "strict": "match",
+   "codes": [
+    "rendering_intent_differs"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "jxl_container_jxlp_last_missing",
+   "original": "s3_rgb16_600x40_srgb.png",
+   "output": "s3_jxl_container_jxlp_nolast.jxl",
+   "exit": 3,
+   "strict": "not_evaluated",
+   "codes": [
+    "truncated"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "jxl_container_box_past_eof",
+   "original": "s3_rgb16_600x40_srgb.png",
+   "output": "s3_jxl_container_cut.jxl",
+   "exit": 3,
+   "strict": "not_evaluated",
+   "codes": [
+    "truncated"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "jxl_container_partial_box_header",
+   "original": "s3_rgb16_600x40_srgb.png",
+   "output": "s3_jxl_container_tail3.jxl",
+   "exit": 3,
+   "strict": "not_evaluated",
+   "codes": [
+    "truncated"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "jxl_codestream_truncated",
+   "original": "s3_rgb16_600x40_srgb.png",
+   "output": "s3_jxl_codestream_cut.jxl",
+   "exit": 3,
+   "strict": "not_evaluated",
+   "codes": [
+    "truncated"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "jxl_codestream_trailing",
+   "original": "s3_rgb16_600x40_srgb.png",
+   "output": "s3_jxl_codestream_trailing.jxl",
+   "exit": 2,
+   "strict": "indeterminate",
+   "codes": [
+    "trailing_data"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "webp_rgba8_hidden_rgb_vs_png_same_icc",
+   "original": "s3_rgba8_iccp_imbc.png",
+   "output": "s3_webp_rgba8_icc.webp",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "lossless + exact keeps RGB under A=0",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "webp_opaque_rgb_vs_png_rgb",
+   "original": "s3_rgb8_iccp_imbc.png",
+   "output": "s3_webp_rgb8_icc.webp",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "alpha_is_used=0 and all alpha 255: compared as RGB",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "webp_default_srgb_vs_png_no_color",
+   "original": "s3_rgba8_plain.png",
+   "output": "s3_webp_rgba8_plain.webp",
+   "exit": 2,
+   "strict": "indeterminate",
+   "codes": [
+    "color_unverified"
+   ],
+   "note": "D12: WebP specification default is not a declaration",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "webp_vs_webp_both_default",
+   "original": "s3_webp_rgba8_plain.webp",
+   "output": "s3_webp_rgba8_plain_b.webp",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "both WebP specification defaults",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "webp_hidden_rgb_1lsb",
+   "original": "s3_rgba8_iccp_imbc.png",
+   "output": "s3_webp_rgba8_hidden_lsb.webp",
+   "exit": 1,
+   "strict": "mismatch",
+   "codes": [
+    "samples_differ"
+   ],
+   "note": "",
+   "check": {
+    "pixels_differing": "1",
+    "first": [
+     0,
+     0
+    ],
+    "channel": "R",
+    "max_abs": 1
+   },
+   "args": []
+  },
+  {
+   "name": "webp_lossy_vp8",
+   "original": "s3_rgba8_plain.png",
+   "output": "s3_webp_rgb8_lossy.webp",
+   "exit": 2,
+   "strict": "not_evaluated",
+   "codes": [
+    "lossy_not_supported"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "webp_animation_imbc",
+   "original": "s3_rgba8_plain.png",
+   "output": "s3_imbc_animation.webp",
+   "exit": 2,
+   "strict": "not_evaluated",
+   "codes": [
+    "animation_not_supported"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "webp_riff_size_past_eof",
+   "original": "s3_rgba8_plain.png",
+   "output": "s3_webp_riff_too_long.webp",
+   "exit": 3,
+   "strict": "not_evaluated",
+   "codes": [
+    "truncated"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "webp_missing_pad_byte",
+   "original": "s3_rgba8_plain.png",
+   "output": "s3_webp_no_pad.webp",
+   "exit": 3,
+   "strict": "not_evaluated",
+   "codes": [
+    "truncated"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "webp_vp8l_truncated",
+   "original": "s3_rgba8_plain.png",
+   "output": "s3_webp_vp8l_cut.webp",
+   "exit": 3,
+   "strict": "not_evaluated",
+   "codes": [],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "webp_trailing_data",
+   "original": "s3_rgba8_plain.png",
+   "output": "s3_webp_trailing.webp",
+   "exit": 2,
+   "strict": "indeterminate",
+   "codes": [
+    "trailing_data"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "webp_vp8x_icc_flag_without_iccp",
+   "original": "s3_rgba8_plain.png",
+   "output": "s3_webp_iccflag_noiccp.webp",
+   "exit": 2,
+   "strict": "indeterminate",
+   "codes": [
+    "webp_container_warning"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "webp_alpha_hint_off_data_has_alpha",
+   "original": "s3_rgba8_7x5_a40.png",
+   "output": "s3_webp_hint_off_alpha40.webp",
+   "exit": 2,
+   "strict": "indeterminate",
+   "codes": [
+    "alpha_hint_mismatch"
+   ],
+   "note": "header hint says opaque, data has alpha 0x40; compared as RGBA",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "webp_vp8x_alpha_flag_vs_hint",
+   "original": "s3_rgb8_7x5.png",
+   "output": "s3_webp_vp8x_alpha_hint_off.webp",
+   "exit": 2,
+   "strict": "indeterminate",
+   "codes": [
+    "alpha_hint_mismatch"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "mixed_jxl_icc_vs_webp_icc",
+   "original": "s3_jxl_rgba8_icc.jxl",
+   "output": "s3_webp_rgba8_icc.webp",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "same embedded ICC on both sides",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "mixed_jxl_srgb_enum_vs_webp_default",
+   "original": "s3_jxl_rgba8_srgb.jxl",
+   "output": "s3_webp_rgba8_plain.webp",
+   "exit": 2,
+   "strict": "indeterminate",
+   "codes": [
+    "color_unverified"
+   ],
+   "note": "D12: JXL enum vs WebP specification default stays unverified",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "imbc_01_v13-icc16__jxl_jxl",
+   "original": "imbc_v13-icc16.png",
+   "output": "imbc_v13-icc16__jxl.jxl",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "IMB-C v1.3.0 conversion #1; samples must be equal",
+   "check": {
+    "samples_equal": true
+   },
+   "args": []
+  },
+  {
+   "name": "imbc_02_v13-Rec2100PQ__jxl_jxl",
+   "original": "imbc_v13-Rec2100PQ.png",
+   "output": "imbc_v13-Rec2100PQ__jxl.jxl",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "IMB-C v1.3.0 conversion #2; samples must be equal",
+   "check": {
+    "samples_equal": true
+   },
+   "args": []
+  },
+  {
+   "name": "imbc_03_v13-Rec2100HLG__jxl_jxl",
+   "original": "imbc_v13-Rec2100HLG.png",
+   "output": "imbc_v13-Rec2100HLG__jxl.jxl",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "IMB-C v1.3.0 conversion #3; samples must be equal",
+   "check": {
+    "samples_equal": true
+   },
+   "args": []
+  },
+  {
+   "name": "imbc_04_v13-cicp-only-pq__jxl_jxl",
+   "original": "imbc_v13-cicp-only-pq.png",
+   "output": "imbc_v13-cicp-only-pq__jxl.jxl",
+   "exit": 2,
+   "strict": "indeterminate",
+   "codes": [
+    "color_unverified"
+   ],
+   "note": "IMB-C v1.3.0 conversion #4; samples must be equal",
+   "check": {
+    "samples_equal": true
+   },
+   "args": []
+  },
+  {
+   "name": "imbc_05_v13-hidden__webp_webp",
+   "original": "imbc_v13-hidden.png",
+   "output": "imbc_v13-hidden__webp.webp",
+   "exit": 2,
+   "strict": "indeterminate",
+   "codes": [
+    "color_unverified"
+   ],
+   "note": "IMB-C v1.3.0 conversion #5; samples must be equal",
+   "check": {
+    "samples_equal": true
+   },
+   "args": []
+  },
+  {
+   "name": "imbc_06_rgba-v12__webp_webp",
+   "original": "imbc_rgba-v12.png",
+   "output": "imbc_rgba-v12__webp.webp",
+   "exit": 2,
+   "strict": "indeterminate",
+   "codes": [
+    "color_unverified"
+   ],
+   "note": "IMB-C v1.3.0 conversion #6; samples must be equal",
+   "check": {
+    "samples_equal": true
+   },
+   "args": []
+  },
+  {
+   "name": "imbc_07_rgba-v12__jxl_jxl",
+   "original": "imbc_rgba-v12.png",
+   "output": "imbc_rgba-v12__jxl.jxl",
+   "exit": 2,
+   "strict": "indeterminate",
+   "codes": [
+    "color_unverified"
+   ],
+   "note": "IMB-C v1.3.0 conversion #7; samples must be equal",
+   "check": {
+    "samples_equal": true
+   },
+   "args": []
+  },
+  {
+   "name": "imbc_08_gray-v12__jxl_jxl",
+   "original": "imbc_gray-v12.png",
+   "output": "imbc_gray-v12__jxl.jxl",
+   "exit": 2,
+   "strict": "indeterminate",
+   "codes": [
+    "color_unverified"
+   ],
+   "note": "IMB-C v1.3.0 conversion #8; samples must be equal",
+   "check": {
+    "samples_equal": true
+   },
+   "args": []
+  },
+  {
+   "name": "imbc_09_rgb-v12__webp-lossy_webp",
+   "original": "imbc_rgb-v12.png",
+   "output": "imbc_rgb-v12__webp-lossy.webp",
+   "exit": 2,
+   "strict": "not_evaluated",
+   "codes": [
+    "lossy_not_supported"
+   ],
+   "note": "IMB-C v1.3.0 conversion #9; samples must be equal",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "imbc_10_rgb-v12__jxl_jxl",
+   "original": "imbc_rgb-v12.png",
+   "output": "imbc_rgb-v12__jxl.jxl",
+   "exit": 2,
+   "strict": "indeterminate",
+   "codes": [
+    "color_unverified"
+   ],
+   "note": "IMB-C v1.3.0 conversion #10; samples must be equal",
+   "check": {
+    "samples_equal": true
+   },
+   "args": []
+  },
+  {
+   "name": "imbc_12_pq-original__png_png",
+   "original": "s3_imbc_pq-original.jxl",
+   "output": "imbc_pq-original__png.png",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "IMB-C v1.3.0 conversion #12; samples must be equal",
+   "check": {
+    "samples_equal": true
+   },
+   "args": []
+  },
+  {
+   "name": "imbc_13_hlg-original__png_png",
+   "original": "s3_imbc_hlg-original.jxl",
+   "output": "imbc_hlg-original__png.png",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "IMB-C v1.3.0 conversion #13; samples must be equal",
+   "check": {
+    "samples_equal": true
+   },
+   "args": []
+  },
+  {
+   "name": "imbc_14_icc8__webp_webp",
+   "original": "imbc_icc8.png",
+   "output": "imbc_icc8__webp.webp",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "IMB-C v1.3.0 conversion #14; samples must be equal",
+   "check": {
+    "samples_equal": true
+   },
+   "args": []
+  },
+  {
+   "name": "psd_rgb8_rle_vs_png",
+   "original": "s5_psd_rgb8_rle.psd",
+   "output": "s5_rgb8.png",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "merged image, Version Info hasRealMergedData=1",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "psd_rgb8_raw_vs_png",
+   "original": "s5_psd_rgb8_raw.psd",
+   "output": "s5_rgb8.png",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "merged image, Version Info hasRealMergedData=1",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "psd_rgb16_rle_vs_png",
+   "original": "s5_psd_rgb16_rle.psd",
+   "output": "s5_rgb16.png",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "psb_rgb16_rle_vs_png",
+   "original": "s5_psb_rgb16_rle.psb",
+   "output": "s5_rgb16.png",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "PSB: 64-bit section lengths, u32 RLE counts",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "psb_rgb16_raw_vs_png",
+   "original": "s5_psb_rgb16_raw.psb",
+   "output": "s5_rgb16.png",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "PSB: 64-bit section lengths",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "psd_rgb16_last_bit_differs",
+   "original": "s5_psd_rgb16_rle.psd",
+   "output": "s5_rgb16_lsb.png",
+   "exit": 1,
+   "strict": "mismatch",
+   "codes": [
+    "samples_differ"
+   ],
+   "note": "",
+   "check": {
+    "pixels_differing": "1",
+    "first": [
+     9,
+     4
+    ],
+    "max_abs": 1
+   },
+   "args": []
+  },
+  {
+   "name": "psd_gray8_vs_png",
+   "original": "s5_psd_gray8.psd",
+   "output": "s5_gray8.png",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "psd_bitmap_vs_png_gray1",
+   "original": "s5_psd_bitmap.psd",
+   "output": "s5_gray1.png",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "bitmap 1 = black inverted to gray code 0",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "psd_indexed_vs_png_palette",
+   "original": "s5_psd_indexed.psd",
+   "output": "s5_pal4.png",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "palette + transparent index 3 vs PLTE + tRNS",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "psd_merged_alpha_vs_png_rgba",
+   "original": "s5_psd_rgba8_merged_alpha.psd",
+   "output": "s5_rgba8.png",
+   "exit": 2,
+   "strict": "indeterminate",
+   "codes": [
+    "alpha_semantics_differ"
+   ],
+   "note": "",
+   "check": {
+    "samples_equal": true
+   },
+   "args": []
+  },
+  {
+   "name": "psd_composite_not_saved",
+   "original": "s5_psd_rgb8_no_composite.psd",
+   "output": "s5_rgb8.png",
+   "exit": 2,
+   "strict": "not_evaluated",
+   "codes": [
+    "psd_composite_not_saved"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "psd_composite_flag_absent",
+   "original": "s5_psd_rgb8_flag_absent.psd",
+   "output": "s5_rgb8.png",
+   "exit": 0,
+   "strict": "match",
+   "codes": [
+    "psd_composite_flag_absent"
+   ],
+   "note": "warning only, no downgrade (user decision Q4)",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "psd_composite_uniform",
+   "original": "s5_psd_rgb8_uniform.psd",
+   "output": "s5_rgb8_uniform.png",
+   "exit": 2,
+   "strict": "indeterminate",
+   "codes": [
+    "psd_composite_uniform"
+   ],
+   "note": "",
+   "check": {
+    "samples_equal": true
+   },
+   "args": []
+  },
+  {
+   "name": "psd_trailing_vs_png",
+   "original": "s5_psd_trailing.psd",
+   "output": "s5_rgb8.png",
+   "exit": 2,
+   "strict": "indeterminate",
+   "codes": [
+    "trailing_data"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "avif_rgb8_lossless_vs_png",
+   "original": "s5_avif_rgb8_lossless.avif",
+   "output": "s5_avif_ref_rgb8.png",
+   "exit": 0,
+   "strict": "match",
+   "codes": [
+    "avif_pixel_verified_lossless"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "avif_rgba8_hidden_rgb_vs_png",
+   "original": "s5_avif_rgba8_lossless.avif",
+   "output": "s5_avif_ref_rgba8.png",
+   "exit": 0,
+   "strict": "match",
+   "codes": [
+    "avif_pixel_verified_lossless"
+   ],
+   "note": "A=0 columns keep their RGB",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "avif_gray8_lossless_vs_png",
+   "original": "s5_avif_gray8_lossless.avif",
+   "output": "s5_avif_ref_gray8.png",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "avif_rgb10_lossless_vs_jxl",
+   "original": "s5_avif_rgb10_lossless.avif",
+   "output": "s5_jxl_rgb10.jxl",
+   "exit": 0,
+   "strict": "match",
+   "codes": [
+    "avif_pixel_verified_lossless"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "avif_rgba10_lossless_vs_jxl",
+   "original": "s5_avif_rgba10_lossless.avif",
+   "output": "s5_jxl_rgba10.jxl",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "avif_rgb12_lossless_vs_jxl",
+   "original": "s5_avif_rgb12_lossless.avif",
+   "output": "s5_jxl_rgb12.jxl",
+   "exit": 0,
+   "strict": "match",
+   "codes": [
+    "avif_pixel_verified_lossless"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "avif_rgba12_lossless_vs_jxl",
+   "original": "s5_avif_rgba12_lossless.avif",
+   "output": "s5_jxl_rgba12.jxl",
+   "exit": 0,
+   "strict": "match",
+   "codes": [],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "avif_rgb10_vs_png16",
+   "original": "s5_avif_rgb10_lossless.avif",
+   "output": "s5_avif_ref_rgb16.png",
+   "exit": 1,
+   "strict": "mismatch",
+   "codes": [
+    "bit_depth_changed"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "avif_identity_lossy_vs_png",
+   "original": "s5_avif_rgb8_identity_q50.avif",
+   "output": "s5_avif_ref_rgb8.png",
+   "exit": 1,
+   "strict": "mismatch",
+   "codes": [
+    "samples_differ"
+   ],
+   "note": "metadata consistent with lossless, pixels prove otherwise",
+   "check": {},
+   "args": []
+  },
+  {
+   "name": "avif_not_lossless_420_bt601_q60",
+   "original": "s5_avif_420_bt601_q60.avif",
+   "output": "s5_avif_ref_rgb8.png",
+   "exit": 2,
+   "strict": "not_evaluated",
+   "codes": [
+    "avif_not_lossless_by_metadata"
+   ],
+   "note": "",
+   "check": {
+    "message_contains": "chroma_subsampled"
+   },
+   "args": []
+  },
+  {
+   "name": "avif_not_lossless_444_bt601_q100",
+   "original": "s5_avif_444_bt601_q100.avif",
+   "output": "s5_avif_ref_rgb8.png",
+   "exit": 2,
+   "strict": "not_evaluated",
+   "codes": [
+    "avif_not_lossless_by_metadata"
+   ],
+   "note": "",
+   "check": {
+    "message_contains": "matrix_not_identity"
+   },
+   "args": []
+  },
+  {
+   "name": "avif_not_lossless_444_identity_limited",
+   "original": "s5_avif_444_identity_limited.avif",
+   "output": "s5_avif_ref_rgb8.png",
+   "exit": 2,
+   "strict": "not_evaluated",
+   "codes": [
+    "avif_not_lossless_by_metadata"
+   ],
+   "note": "",
+   "check": {
+    "message_contains": "limited_range"
+   },
+   "args": []
+  },
+  {
+   "name": "avif_not_lossless_444_premultiplied",
+   "original": "s5_avif_444_premultiplied.avif",
+   "output": "s5_avif_ref_rgba8.png",
+   "exit": 2,
+   "strict": "not_evaluated",
+   "codes": [
+    "avif_not_lossless_by_metadata"
+   ],
+   "note": "",
+   "check": {
+    "message_contains": "alpha_premultiplied"
+   },
+   "args": []
+  },
+  {
+   "name": "avif_job_limit_suggests_value",
+   "original": "s5_avif_ref_rgb8.png",
+   "output": "s5_avif_rgb8_lossless.avif",
+   "exit": 4,
+   "strict": "not_evaluated",
+   "codes": [
+    "resource_limit"
+   ],
+   "note": "",
+   "check": {
+    "message_contains": "rerun with --limits job_commit_mib=256",
+    "resource_need": {
+     "side": "output",
+     "limit": "job_commit_mib",
+     "suggested_value": 256,
+     "suggested_argument": "--limits job_commit_mib=256",
+     "current_value": 64
+    }
+   },
+   "args": [
+    "--limits",
+    "job_commit_mib=64"
+   ]
+  },
+  {
+   "name": "avif_job_limit_suggested_value_works",
+   "original": "s5_avif_ref_rgb8.png",
+   "output": "s5_avif_rgb8_lossless.avif",
+   "exit": 0,
+   "strict": "match",
+   "codes": [
+    "avif_pixel_verified_lossless"
+   ],
+   "note": "",
+   "check": {},
+   "args": [
+    "--limits",
+    "job_commit_mib=256"
+   ]
+  },
+  {
+   "name": "avif_irot_vs_png",
+   "original": "s5_avif_rgb8_irot1.avif",
+   "output": "s5_avif_ref_rgb8.png",
+   "exit": 1,
+   "strict": "mismatch",
+   "codes": [
+    "orientation_differs"
+   ],
+   "note": "",
+   "check": {},
+   "args": []
+  }
+ ],
+ "singles": [
+  {
+   "name": "inspect_ok",
+   "file": "s1_rgb16_srgb.png",
+   "exit": 0
+  },
+  {
+   "name": "inspect_truncated",
+   "file": "s1_trunc.png",
+   "exit": 3
+  },
+  {
+   "name": "inspect_interlace_flag_only",
+   "file": "s1_interlaced.png",
+   "exit": 3
+  },
+  {
+   "name": "inspect_trailing",
+   "file": "s1_trailing.png",
+   "exit": 2
+  },
+  {
+   "name": "inspect_broken_ztxt",
+   "file": "s1_ztxt_broken.png",
+   "exit": 2
+  },
+  {
+   "name": "inspect_webp_no_image_chunk",
+   "file": "s2_webp_magic_only.webp",
+   "exit": 3
+  },
+  {
+   "name": "inspect_unknown_format",
+   "file": "s2_unknown_format.bin",
+   "exit": 2
+  },
+  {
+   "name": "png_text_keyword_latin1",
+   "file": "s4_text_keyword_latin1.png",
+   "exit": 0,
+   "meta": {
+    "text": "entries=1 keys=[tEXt:Café] values_sha256=b650518c9a1f86c1"
+   }
+  },
+  {
+   "name": "png_ztxt_broken_keyword_latin1",
+   "file": "s4_ztxt_broken_keyword_latin1.png",
+   "exit": 2,
+   "codes": [
+    "metadata_parse_failed"
+   ],
+   "message_contains": "'Résumé'"
+  },
+  {
+   "name": "inspect_adam7",
+   "file": "s2_rgba16_37x29_adam7.png",
+   "exit": 0
+  },
+  {
+   "name": "inspect_adam7_truncated",
+   "file": "s2_adam7_trunc.png",
+   "exit": 3
+  },
+  {
+   "name": "inspect_tiff_ok",
+   "file": "s2_tif_rgb16_le_tile_deflate.tif",
+   "exit": 0
+  },
+  {
+   "name": "inspect_bigtiff_ok",
+   "file": "s2_btf_rgb16_be_tile_deflate.tif",
+   "exit": 0
+  },
+  {
+   "name": "inspect_tiff_jpeg_not_checked",
+   "file": "s2_tif_rgb8_jpeg_declared.tif",
+   "exit": 2
+  },
+  {
+   "name": "inspect_tiff_truncated",
+   "file": "s2_tif_trunc_strip.tif",
+   "exit": 3
+  },
+  {
+   "name": "inspect_tiff_multipage",
+   "file": "s2_tif_rgb16_two_pages.tif",
+   "exit": 2
+  },
+  {
+   "name": "inspect_webp_16383x1",
+   "file": "s3_webp_16383x1.webp",
+   "exit": 0,
+   "codes": [],
+   "dimension_policy": {
+    "spec_max": 16384,
+    "policy_max": 16383,
+    "within_spec": true,
+    "within_policy": true
+   }
+  },
+  {
+   "name": "inspect_webp_1x16383",
+   "file": "s3_webp_1x16383.webp",
+   "exit": 0,
+   "codes": [],
+   "dimension_policy": {
+    "spec_max": 16384,
+    "policy_max": 16383,
+    "within_spec": true,
+    "within_policy": true
+   }
+  },
+  {
+   "name": "inspect_webp_16384x1",
+   "file": "s3_webp_16384x1.webp",
+   "exit": 2,
+   "codes": [
+    "unsupported_dimension"
+   ],
+   "dimension_policy": {
+    "spec_max": 16384,
+    "policy_max": 16383,
+    "within_spec": true,
+    "within_policy": false
+   }
+  },
+  {
+   "name": "inspect_webp_1x16384",
+   "file": "s3_webp_1x16384.webp",
+   "exit": 2,
+   "codes": [
+    "unsupported_dimension"
+   ],
+   "dimension_policy": {
+    "spec_max": 16384,
+    "policy_max": 16383,
+    "within_spec": true,
+    "within_policy": false
+   }
+  },
+  {
+   "name": "inspect_imbc_pq",
+   "file": "s3_imbc_pq-original.jxl",
+   "exit": 0
+  },
+  {
+   "name": "inspect_imbc_hlg",
+   "file": "s3_imbc_hlg-original.jxl",
+   "exit": 0
+  },
+  {
+   "name": "inspect_jxl_container",
+   "file": "s3_jxl_container_jxlp3.jxl",
+   "exit": 0
+  },
+  {
+   "name": "inspect_jxl_truncated",
+   "file": "s3_jxl_codestream_cut.jxl",
+   "exit": 3
+  },
+  {
+   "name": "inspect_psd_cmyk8",
+   "file": "s5_psd_cmyk8.psd",
+   "exit": 2,
+   "codes": [
+    "unsupported_sample_model"
+   ]
+  },
+  {
+   "name": "inspect_psd_cmyk16",
+   "file": "s5_psd_cmyk16.psd",
+   "exit": 2,
+   "codes": [
+    "unsupported_sample_model"
+   ]
+  },
+  {
+   "name": "inspect_psd_rgb32",
+   "file": "s5_psd_rgb32.psd",
+   "exit": 2,
+   "codes": [
+    "unsupported_sample_model"
+   ]
+  },
+  {
+   "name": "inspect_psd_zip",
+   "file": "s5_psd_rgb8_zip.psd",
+   "exit": 2,
+   "codes": [
+    "compression_not_supported"
+   ]
+  },
+  {
+   "name": "inspect_psd_rgb8",
+   "file": "s5_psd_rgb8_rle.psd",
+   "exit": 0
+  },
+  {
+   "name": "inspect_psb_rgb16",
+   "file": "s5_psb_rgb16_rle.psb",
+   "exit": 0
+  },
+  {
+   "name": "inspect_psd_truncated",
+   "file": "s5_psd_truncated.psd",
+   "exit": 3,
+   "codes": [
+    "truncated"
+   ]
+  },
+  {
+   "name": "inspect_psd_header_only",
+   "file": "s5_psd_header_only.psd",
+   "exit": 3
+  },
+  {
+   "name": "inspect_psd_trailing",
+   "file": "s5_psd_trailing.psd",
+   "exit": 2,
+   "codes": [
+    "trailing_data"
+   ]
+  },
+  {
+   "name": "inspect_psd_rle_row_overflow",
+   "file": "s5_psd_rle_bad_row.psd",
+   "exit": 3,
+   "codes": [
+    "structure_error"
+   ]
+  },
+  {
+   "name": "inspect_psd_resources_past_eof",
+   "file": "s5_psd_bad_resources.psd",
+   "exit": 3,
+   "codes": [
+    "truncated"
+   ]
+  },
+  {
+   "name": "inspect_avif_rgb8_lossless",
+   "file": "s5_avif_rgb8_lossless.avif",
+   "exit": 0,
+   "codes": [
+    "avif_lossless_metadata_only"
+   ]
+  },
+  {
+   "name": "inspect_avif_truncated",
+   "file": "s5_avif_truncated.avif",
+   "exit": 3,
+   "codes": [
+    "truncated"
+   ]
+  },
+  {
+   "name": "inspect_avif_box_past_eof",
+   "file": "s5_avif_box_past_eof.avif",
+   "exit": 3
+  }
+ ]
+}

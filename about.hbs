@@ -1,0 +1,67 @@
+THIRD-PARTY SOFTWARE NOTICES
+iat (Image Analysis Tool) {{!-- version is in README / CHANGELOG --}}
+
+iat.exe, iat-gui.exe and iat-worker.exe are licensed under the MIT License,
+Copyright (c) 2026 Kaido-MSVC (see LICENSE.txt). They contain the third-party
+material listed below. No C or C++ library is linked; every component listed in
+part 2 is a Rust crate compiled into the executables.
+
+========================================================================
+1. Data generated with libjxl 0.12.0
+========================================================================
+
+iat-core embeds a table of 289 ICC profiles (269,112 bytes) that libjxl 0.12.0
+synthesizes from JPEG XL colour encodings. The table was produced by running
+libjxl itself (tools/libjxl_gen/gen_jxl_icc_table.cpp in the source repository),
+so it is covered by the libjxl license:
+
+  libjxl - https://github.com/libjxl/libjxl
+  License: BSD-3-Clause
+  Copyright (c) the JPEG XL Project Authors.
+  Full text: licenses/libjxl-BSD-3-Clause.txt
+
+========================================================================
+2. Slint 1.19.0 (graphical user interface of iat-gui.exe)
+========================================================================
+
+iat-gui.exe is built with Slint, used under the Slint Royalty-free Desktop,
+Mobile, and Web Applications License 2.0 (the About screen shows the
+AboutSlint widget required by that license). Crates under this license:
+
+  - slint 1.19.0
+  - slint-macros 1.19.0
+  - i-slint-backend-selector 1.19.0
+  - i-slint-backend-winit 1.19.0
+  - i-slint-common 1.19.0
+  - i-slint-compiler 1.19.0
+  - i-slint-core 1.19.0
+  - i-slint-core-macros 1.19.0
+  - i-slint-renderer-femtovg 1.19.0
+
+  Source: https://github.com/slint-ui/slint
+  License: LicenseRef-Slint-Royalty-free-2.0
+  Copyright (c) SixtyFPS GmbH <info@slint.dev>
+  Full text: licenses/LicenseRef-Slint-Royalty-free-2.0.md
+
+========================================================================
+3. Rust crates
+========================================================================
+
+Overview (license: crates)
+{{#each overview}}
+  {{{name}}} ({{id}}): {{count}} crate(s)
+{{/each}}
+
+Each license text follows, with the crates that use it.
+{{#each licenses}}
+
+------------------------------------------------------------------------
+{{{name}}} ({{id}})
+Used by:
+{{#each used_by}}
+  - {{crate.name}} {{crate.version}}{{#if crate.repository}} ({{{crate.repository}}}){{/if}}
+{{/each}}
+------------------------------------------------------------------------
+
+{{{text}}}
+{{/each}}
