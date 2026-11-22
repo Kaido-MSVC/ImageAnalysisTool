@@ -200,7 +200,10 @@ pub fn run_analysis(req: &RunRequest, cancel: &CancelToken, progress: &dyn Progr
         Ok(id) => (id, None),
         Err(st) => (
             String::new(),
-            Some(format!("cannot generate a run id: BCryptGenRandom failed with NTSTATUS 0x{:08X}", st as u32)),
+            Some(format!(
+                "cannot generate a run id: BCryptGenRandom failed with NTSTATUS 0x{:08X}",
+                st.cast_unsigned()
+            )),
         ),
     };
     let mut r = Report { run_id, mode: req.mode.as_str().into(), ..Report::default() };

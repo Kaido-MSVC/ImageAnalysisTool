@@ -31,6 +31,7 @@ pub const DECODER_VERSION: &str = "1.1.0";
 const COVERAGE_ALLOWANCE: u64 = 1 << 20;
 
 /// libavif 的 `avifLimitedToFullY`（reformat.c）：limited range 的 alpha 轉成全範圍。
+#[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "已 clamp 到 0..=full（≤ 4095）")]
 pub fn limited_to_full(depth: u8, v: u16) -> u16 {
     let (lo, hi, full): (i32, i32, i32) = match depth {
         8 => (16, 235, 255),
@@ -274,8 +275,8 @@ impl AvifDecoder<'_> {
                 let depth = a.depth();
                 let (tw, th) = a.tile_size();
                 let cols = a.grid.map_or(1, |gr| gr.columns);
-                for (x, v) in a_row.iter_mut().enumerate() {
-                    let t = ((y / th) * cols + x as u32 / tw) as usize;
+                for (x, v) in (0u32..).zip(a_row.iter_mut()) {
+                    let t = ((y / th) * cols + x / tw) as usize;
                     if !full[t.min(full.len() - 1)] {
                         *v = limited_to_full(depth, *v);
                     }
@@ -287,7 +288,7 @@ impl AvifDecoder<'_> {
                     if g.planes == 3 { [v_row[x], y_row[x], u_row[x], a_row[x]] } else { [y_row[x], a_row[x], 0, 0] };
                 for &v in &px[..ch_n] {
                     if g.depth <= 8 {
-                        out.push(v as u8);
+                        out.push(v.to_le_bytes()[0]); // 8 位元樣本，只取低位元組
                     } else {
                         out.extend_from_slice(&v.to_ne_bytes());
                     }

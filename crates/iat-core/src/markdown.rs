@@ -28,12 +28,11 @@ fn esc(s: &str) -> String {
     md_escape(s, 200)
 }
 
+#[expect(clippy::cast_precision_loss, reason = "對照 C++ static_cast<double>（只供顯示）")]
 fn mib(b: u64) -> String {
-    if b >= 1 << 30 {
-        format!("{:.2} GiB", b as f64 / (1u64 << 30) as f64)
-    } else {
-        format!("{:.2} MiB", b as f64 / (1u64 << 20) as f64)
-    }
+    const GIB: f64 = 1_073_741_824.0;
+    const MIB: f64 = 1_048_576.0;
+    if b >= 1 << 30 { format!("{:.2} GiB", b as f64 / GIB) } else { format!("{:.2} MiB", b as f64 / MIB) }
 }
 
 /// 1,234,567
@@ -68,7 +67,7 @@ fn g6(v: f64) -> String {
         let m = trim(mant.to_string());
         format!("{m}e{}{:02}", if exp < 0 { '-' } else { '+' }, exp.abs())
     } else {
-        trim(format!("{v:.*}", (5 - exp) as usize))
+        trim(format!("{v:.*}", (5 - exp).unsigned_abs() as usize)) // -4 ≤ exp < 6，5 - exp ≥ 0
     }
 }
 

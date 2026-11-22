@@ -124,12 +124,12 @@ impl<'a> PsdDecoder<'a> {
         false
     }
 
-    fn sample(&self, c: usize, x: usize) -> u32 {
+    fn sample(&self, c: usize, x: usize) -> u16 {
         let p = &self.raw[c];
         match self.sc.depth {
-            16 => u32::from(p[2 * x]) << 8 | u32::from(p[2 * x + 1]),
-            8 => u32::from(p[x]),
-            _ => u32::from((p[x >> 3] >> (7 - (x & 7))) & 1), // bitmap
+            16 => u16::from_be_bytes([p[2 * x], p[2 * x + 1]]),
+            8 => u16::from(p[x]),
+            _ => u16::from((p[x >> 3] >> (7 - (x & 7))) & 1), // bitmap
         }
     }
 
@@ -154,7 +154,7 @@ impl<'a> PsdDecoder<'a> {
                 0 => px[0] = if self.sample(0, x) != 0 { 0 } else { 1 },
                 _ => {
                     for (c, v) in px.iter_mut().enumerate() {
-                        *v = self.sample(c, x) as u16;
+                        *v = self.sample(c, x);
                     }
                 }
             }
@@ -489,7 +489,7 @@ pub fn prepare_psd<'a>(
         } else if o == 0 {
             fr.orientation = Orientation { source: "default".into(), value: 1 };
         } else {
-            fr.orientation = Orientation { source: "exif".into(), value: o as u32 };
+            fr.orientation = Orientation { source: "exif".into(), value: o.cast_unsigned() };
         }
     } else {
         fr.orientation = Orientation { source: "default".into(), value: 1 };

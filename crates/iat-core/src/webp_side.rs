@@ -374,7 +374,7 @@ pub fn prepare_webp<'a>(
         } else if o == 0 {
             fr.orientation = Orientation { source: "default".into(), value: 1 };
         } else {
-            fr.orientation = Orientation { source: "exif".into(), value: o as u32 };
+            fr.orientation = Orientation { source: "exif".into(), value: o.cast_unsigned() };
         }
     } else {
         fr.orientation = Orientation { source: "default".into(), value: 1 };

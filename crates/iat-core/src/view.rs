@@ -101,7 +101,8 @@ pub fn decode_for_view(
         return Err(ViewError::Temp("temporary directory is not available".into()));
     }
     let free = win::disk_free_bytes(&dir).map_err(|e| ViewError::Temp(win::error_text(e)))?;
-    let run_id = crate::run::new_run_id().map_err(|st| ViewError::Temp(format!("NTSTATUS 0x{:08X}", st as u32)))?;
+    let run_id =
+        crate::run::new_run_id().map_err(|st| ViewError::Temp(format!("NTSTATUS 0x{:08X}", st.cast_unsigned())))?;
     let mut temp = RunTemp::create(&dir, &run_id).map_err(|e| ViewError::Temp(e.to_string()))?;
     let res = if sniff_format(input.head()) == "avif" {
         view_in_worker(&file, &temp, free, limits, max_pixels, cancel)

@@ -160,7 +160,8 @@ fn read_header(input: &Input<'_>, sc: &JxlScan) -> HeaderInfo {
     };
     match jxl_header::parse(&head) {
         Ok(p) => {
-            h.all_channels = p.color_channels() + p.extra.len() as u32;
+            h.all_channels =
+                u32::try_from(p.extra.len()).ok().and_then(|n| p.color_channels().checked_add(n)).unwrap_or(u32::MAX);
             h.header = Some(p);
             h.status = "ok";
         }
@@ -264,11 +265,11 @@ fn enum_color(c: &JxlColorEncoding) -> EnumColor {
     }
     let intent = intent_code(ri);
     let custom = w == 2 || p == 2 || t == 65535;
-    let lookup = (!custom && t <= 255).then_some(EnumKey {
+    let lookup = u8::try_from(t).ok().filter(|_| !custom).map(|t| EnumKey {
         color_space: space,
         white_point: w,
         primaries: p,
-        transfer_function: t as u8,
+        transfer_function: t,
         rendering_intent: intent,
     });
     EnumColor { key, intent, transfer: t, lookup }
@@ -350,6 +351,7 @@ impl<'a> JxlImageDecoder<'a> {
                 }
                 Ok(Event::BasicInfo) => {
                     let extra = d.basic_info().map_or(0, |b| b.extra_channels.len());
+                    #[expect(clippy::cast_possible_truncation, reason = "JXL 位元深度 ≤ 64（1 + 6 bits 編碼）")]
                     let pf = JxlPixelFormat {
                         color_type,
                         color_data_format: Some(JxlDataFormat::U16 {
@@ -533,7 +535,9 @@ fn fill_metadata(fr: &mut FileReport, sc: &JxlScan, transfer: Option<u16>, inten
         if !hdr.is_empty() {
             hdr.push(' ');
         }
-        hdr += &format!("intensity_target={}", intensity_target as i32);
+        #[expect(clippy::cast_possible_truncation, reason = "對照 C++ static_cast 截斷")]
+        let target = intensity_target as i32;
+        hdr += &format!("intensity_target={target}");
     }
     item("hdr_signals", !hdr.is_empty(), "present", hdr);
     let mut others = sc.other_boxes.join(",");
@@ -767,8 +771,8 @@ mod tests {
         };
         let alpha = bi.extra_channels.iter().filter(|e| matches!(e.ec_type, ExtraChannel::Alpha)).count();
         Some((
-            bi.size.0 as u32,
-            bi.size.1 as u32,
+            u32::try_from(bi.size.0).ok()?,
+            u32::try_from(bi.size.1).ok()?,
             bits,
             bi.extra_channels.len(),
             orientation_value(bi.orientation),

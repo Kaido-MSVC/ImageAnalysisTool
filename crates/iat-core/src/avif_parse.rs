@@ -152,6 +152,12 @@ impl<'a> Stream<'a> {
         }
         Some(v)
     }
+    /// 讀 `n` ≤ 8 位元並回傳 u8。
+    #[expect(clippy::cast_possible_truncation, reason = "n ≤ 8 位元，值一定小於 256")]
+    fn bits_u8(&mut self, n: usize) -> Option<u8> {
+        debug_assert!(n <= 8, "bits_u8 reads at most 8 bits, got {n}");
+        self.bits(n).map(|v| v as u8)
+    }
     /// `avifROStreamReadVersionAndFlags`
     fn version_flags(&mut self) -> Option<(u8, u32)> {
         let b = self.read(4)?;
@@ -371,11 +377,11 @@ fn parse_iloc(meta: &mut Meta, raw: &[u8]) -> R<()> {
     if version > 2 {
         return Err(ParseError::bmff(format!("Box[iloc] has an unsupported version [{version}]")));
     }
-    let offset_size = s.bits(4).ok_or_else(e)? as u8;
-    let length_size = s.bits(4).ok_or_else(e)? as u8;
-    let base_size = s.bits(4).ok_or_else(e)? as u8;
+    let offset_size = s.bits_u8(4).ok_or_else(e)?;
+    let length_size = s.bits_u8(4).ok_or_else(e)?;
+    let base_size = s.bits_u8(4).ok_or_else(e)?;
     let index_size = if version == 1 || version == 2 {
-        s.bits(4).ok_or_else(e)? as u8
+        s.bits_u8(4).ok_or_else(e)?
     } else {
         s.bits(4).ok_or_else(e)?;
         0
@@ -495,15 +501,15 @@ fn parse_property(kind: [u8; 4], raw: &[u8], raw_offset: u64) -> R<Prop> {
                 let version = s.bits(7)?;
                 (marker == 1 && version == 1).then_some(())?;
                 let c = Av1C {
-                    seq_profile: s.bits(3)? as u8,
-                    seq_level_idx0: s.bits(5)? as u8,
-                    seq_tier0: s.bits(1)? as u8,
-                    high_bitdepth: s.bits(1)? as u8,
-                    twelve_bit: s.bits(1)? as u8,
-                    monochrome: s.bits(1)? as u8,
-                    chroma_subsampling_x: s.bits(1)? as u8,
-                    chroma_subsampling_y: s.bits(1)? as u8,
-                    chroma_sample_position: s.bits(2)? as u8,
+                    seq_profile: s.bits_u8(3)?,
+                    seq_level_idx0: s.bits_u8(5)?,
+                    seq_tier0: s.bits_u8(1)?,
+                    high_bitdepth: s.bits_u8(1)?,
+                    twelve_bit: s.bits_u8(1)?,
+                    monochrome: s.bits_u8(1)?,
+                    chroma_subsampling_x: s.bits_u8(1)?,
+                    chroma_subsampling_y: s.bits_u8(1)?,
+                    chroma_sample_position: s.bits_u8(2)?,
                 };
                 s.skip(1).then_some(Prop::Av1C(c))
             })();
@@ -523,14 +529,14 @@ fn parse_property(kind: [u8; 4], raw: &[u8], raw_offset: u64) -> R<Prop> {
         b"irot" => {
             let ok = (|| {
                 (s.bits(6)? == 0).then_some(())?;
-                Some(Prop::Irot(s.bits(2)? as u8))
+                Some(Prop::Irot(s.bits_u8(2)?))
             })();
             ok.ok_or_else(|| fail("irot"))?
         }
         b"imir" => {
             let ok = (|| {
                 (s.bits(7)? == 0).then_some(())?;
-                Some(Prop::Imir(s.bits(1)? as u8))
+                Some(Prop::Imir(s.bits_u8(1)?))
             })();
             ok.ok_or_else(|| fail("imir"))?
         }
@@ -1029,11 +1035,19 @@ impl Bits<'_> {
                 break;
             }
         }
-        if val > u64::from(u32::MAX) || more {
-            self.error = true;
-            return 0;
+        match u32::try_from(val) {
+            Ok(v) if !more => v,
+            _ => {
+                self.error = true;
+                0
+            }
         }
-        val as u32
+    }
+    /// 讀 `n` ≤ 8 位元並回傳 u8。
+    #[expect(clippy::cast_possible_truncation, reason = "n ≤ 8 位元，值一定小於 256")]
+    fn read_u8(&mut self, n: u32) -> u8 {
+        debug_assert!(n <= 8, "read_u8 reads at most 8 bits, got {n}");
+        self.read(n) as u8
     }
 }
 
@@ -1136,7 +1150,7 @@ fn parse_seq_header(b: &mut Bits<'_>) -> Option<SeqColor> {
         8
     };
     let mono = if profile != 1 { b.read(1) } else { 0 };
-    let (p, t, m) = if b.read(1) != 0 { (b.read(8), b.read(8), b.read(8)) } else { (2, 2, 2) };
+    let (p, t, m) = if b.read(1) != 0 { (b.read_u8(8), b.read_u8(8), b.read_u8(8)) } else { (2, 2, 2) };
     let full;
     if mono != 0 {
         full = b.read(1) != 0;
@@ -1171,7 +1185,7 @@ fn parse_seq_header(b: &mut Bits<'_>) -> Option<SeqColor> {
     if b.error {
         return None;
     }
-    Some(SeqColor { primaries: p as u16, transfer: t as u16, matrix: m as u16, full_range: full })
+    Some(SeqColor { primaries: u16::from(p), transfer: u16::from(t), matrix: u16::from(m), full_range: full })
 }
 
 /// `av1SequenceHeaderParse`：在 OBU 裡找序列標頭。
@@ -1189,6 +1203,7 @@ pub fn sequence_header_color(obus: &[u8]) -> Option<SeqColor> {
         if ext != 0 {
             b.read(8);
         }
+        #[expect(clippy::cast_possible_truncation, reason = "對照 C++ static_cast 截斷")]
         let size = if has_size != 0 { b.uleb128() } else { (d.len() as u32).wrapping_sub(1 + ext) };
         if b.error {
             return None;
@@ -1460,7 +1475,7 @@ fn check_fill(input: &Input<'_>, it: &Item) -> R<()> {
 
 /// `avifCropRectFromCleanApertureBox` 的有效性（strict）。
 fn clap_valid(c: &Clap, image_w: u32, image_h: u32) -> bool {
-    let [wn, wd, hn, hd, hon, hod, von, vod] = c.v.map(|x| x as i32);
+    let [wn, wd, hn, hd, hon, hod, von, vod] = c.v.map(u32::cast_signed);
     if wd <= 0 || hd <= 0 || hod <= 0 || vod <= 0 || wn < 0 || hn < 0 {
         return false;
     }
@@ -1468,9 +1483,9 @@ fn clap_valid(c: &Clap, image_w: u32, image_h: u32) -> bool {
         return false;
     }
     let (cw, ch) = (wn / wd, hn / hd);
-    if image_w > i32::MAX as u32 || image_h > i32::MAX as u32 {
+    let (Ok(image_w_i), Ok(image_h_i)) = (i32::try_from(image_w), i32::try_from(image_h)) else {
         return false;
-    }
+    };
     let center = |dim: i32| if dim % 2 != 0 { (i64::from(dim), 2i64) } else { (i64::from(dim >> 1), 1i64) };
     // avifFractionAdd／Sub：分母通分後檢查 int32 溢位
     let add = |a: (i64, i64), b: (i64, i64)| -> Option<(i64, i64)> {
@@ -1479,8 +1494,8 @@ fn clap_valid(c: &Clap, image_w: u32, image_h: u32) -> bool {
         (fits(n) && fits(d)).then_some((n, d))
     };
     let neg = |a: (i64, i64)| (-a.0, a.1);
-    let Some(ccx) = add(center(image_w as i32), (i64::from(hon), i64::from(hod))) else { return false };
-    let Some(ccy) = add(center(image_h as i32), (i64::from(von), i64::from(vod))) else { return false };
+    let Some(ccx) = add(center(image_w_i), (i64::from(hon), i64::from(hod))) else { return false };
+    let Some(ccy) = add(center(image_h_i), (i64::from(von), i64::from(vod))) else { return false };
     let Some(cx) = add(ccx, neg((i64::from(cw), 2))) else { return false };
     if cx.0 % cx.1 != 0 {
         return false;
@@ -1492,8 +1507,10 @@ fn clap_valid(c: &Clap, image_w: u32, image_h: u32) -> bool {
     if cx.0 < 0 || cy.0 < 0 {
         return false;
     }
-    let (x, y) = ((cx.0 / cx.1) as u64, (cy.0 / cy.1) as u64);
-    cw != 0 && ch != 0 && x + cw as u64 <= u64::from(image_w) && y + ch as u64 <= u64::from(image_h)
+    // 上面已確認分子 ≥ 0、分母 > 0、cw／ch ≥ 0，轉成無號不會改變數值
+    let (x, y) = ((cx.0 / cx.1).cast_unsigned(), (cy.0 / cy.1).cast_unsigned());
+    let (cw, ch) = (u64::from(cw.cast_unsigned()), u64::from(ch.cast_unsigned()));
+    cw != 0 && ch != 0 && x + cw <= u64::from(image_w) && y + ch <= u64::from(image_h)
 }
 
 /// `avifDecoderItemValidateProperties`
@@ -1754,9 +1771,10 @@ pub fn parse(input: &Input<'_>) -> R<Parsed> {
             // libavif 建一個假的 grid item 來放 alpha tile（不在輸入裡，不檢查 pixi）
             let new_id = (1..).find(|id| !meta.items.iter().any(|t| t.id == *id)).expect("an unused id");
             let (w, h) = (meta.items[ci].width, meta.items[ci].height);
-            for (d, &j) in map.iter().enumerate() {
+            // map 的長度是 rows × columns（u32），索引放得進 u32
+            for (d, &j) in (0u32..).zip(&map) {
                 meta.items[j].dimg_for = new_id;
-                meta.items[j].dimg_idx = d as u32;
+                meta.items[j].dimg_idx = d;
             }
             meta.items.push(Item { id: new_id, kind: *b"grid", width: w, height: h, ..Item::default() });
             alpha_idx = Some(meta.items.len() - 1);

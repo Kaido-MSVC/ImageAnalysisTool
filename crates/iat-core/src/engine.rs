@@ -130,6 +130,14 @@ pub struct SideState<'a> {
     pub av1_failed: bool,
 }
 
+impl SideState<'_> {
+    /// 下一列的列號（read_row() 只在 rows < height 時被呼叫）。
+    #[expect(clippy::cast_possible_truncation, reason = "rows < height，height 是 u32")]
+    pub fn next_row(&self) -> u32 {
+        self.rows as u32
+    }
+}
+
 /// 一側的解碼器。引擎依序呼叫：open() 一次；每列 read_row() 一次（由上而下），直到失敗或讀完；
 /// 最後 finish() 一次。read_row() 成功時，SideState::canon 裡有 width × channels 個正規樣本。
 pub trait Decoder<'a> {
@@ -520,8 +528,19 @@ struct Stats {
 }
 
 /// 與 C++ 版 U128::approx 相同的換算（只供顯示）。
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    reason = "對照 C++ static_cast 截斷：U128 拆成 hi／lo 兩個 uint64 再轉 double"
+)]
 fn approx(v: u128) -> f64 {
     (v >> 64) as u64 as f64 * 18446744073709551616.0 + v as u64 as f64
+}
+
+/// u64 轉 f64（只供顯示的比例與平均）。
+#[expect(clippy::cast_precision_loss, reason = "對照 C++ static_cast<double>")]
+fn to_f64(v: u64) -> f64 {
+    v as f64
 }
 
 /// 一次分析，產生 C++ 版 worker 那一半的報告（身分欄位與執行層級資料由 [`crate::run`] 補上）。
@@ -858,8 +877,8 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Outcome {
                     rmse: 0.0,
                 };
                 if stats.pixels > 0 {
-                    cs.mae = approx(stats.sumabs[c]) / stats.pixels as f64;
-                    cs.rmse = (approx(stats.sumsq[c]) / stats.pixels as f64).sqrt();
+                    cs.mae = approx(stats.sumabs[c]) / to_f64(stats.pixels);
+                    cs.rmse = (approx(stats.sumsq[c]) / to_f64(stats.pixels)).sqrt();
                 }
                 sc.per_channel.push(cs);
             }
@@ -1072,12 +1091,12 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Outcome {
         r.size.output_bytes = Some(Count(sb_));
         r.size.comparable = complete;
         if sa_ > 0 {
-            let ratio = sb_ as f64 / sa_ as f64;
+            let ratio = to_f64(sb_) / to_f64(sa_);
             r.size.output_ratio = Some(ratio);
             r.size.saving_ratio = Some(1.0 - ratio);
         }
         if sb_ > 0 {
-            r.size.compression_factor = Some(sa_ as f64 / sb_ as f64);
+            r.size.compression_factor = Some(to_f64(sa_) / to_f64(sb_));
         }
         if !complete {
             r.size.note = "at least one file did not decode completely; not a valid conversion size comparison".into();

@@ -232,6 +232,10 @@ impl<'a, 'b> Reader<'a, 'b> {
         self.bytes(off, &mut v).then_some(v)
     }
 
+    pub fn u16(&self, p: [u8; 2]) -> u16 {
+        if self.le { u16::from_le_bytes(p) } else { u16::from_be_bytes(p) }
+    }
+
     pub fn u(&self, p: &[u8]) -> u64 {
         uint(p, self.le)
     }
@@ -366,8 +370,8 @@ fn scan_ifd(s: &mut TiffScan, rd: &mut Reader<'_, '_>, file_size: u64, lim: &Lim
     let mut prev = 0u16;
     for i in 0..n {
         let p = &raw[u64_to_usize(i * ent_size)..u64_to_usize((i + 1) * ent_size)];
-        let tag = rd.u(&p[0..2]) as u16;
-        let typ = rd.u(&p[2..4]) as u16;
+        let tag = rd.u16([p[0], p[1]]);
+        let typ = rd.u16([p[2], p[3]]);
         let count = if big { rd.u(&p[4..12]) } else { rd.u(&p[4..8]) };
         let ts = type_size(typ);
         s.tag_list.push(tag.to_string());
@@ -408,21 +412,27 @@ fn scan_ifd(s: &mut TiffScan, rd: &mut Reader<'_, '_>, file_size: u64, lim: &Lim
         get(s, tag).and_then(|e| rd.scalar(&e)).unwrap_or(dflt)
     };
 
-    s.width = scalar(s, rd, 256, 0).min(u64::from(u32::MAX)) as u32;
-    s.height = scalar(s, rd, 257, 0).min(u64::from(u32::MAX)) as u32;
-    // C++ 版以 static_cast<uint16_t> 截斷
-    s.spp = scalar(s, rd, 277, 1) as u16;
-    s.compression = scalar(s, rd, 259, 1) as u16;
-    s.photometric = scalar(s, rd, 262, 0xFFFF) as u16;
-    s.planar = scalar(s, rd, 284, 1) as u16;
-    s.sample_format = scalar(s, rd, 339, 1) as u16;
-    s.predictor = scalar(s, rd, 317, 1) as u16;
-    s.fill_order = scalar(s, rd, 266, 1) as u16;
+    // C++ 版以 static_cast<uint16_t>／<uint32_t> 截斷
+    #[expect(clippy::cast_possible_truncation, reason = "對照 C++ static_cast 截斷")]
+    let trunc16 = |v: u64| v as u16;
+    #[expect(clippy::cast_possible_truncation, reason = "對照 C++ static_cast 截斷")]
+    let trunc32 = |v: u64| v as u32;
+    let clamp32 = |v: u64| u32::try_from(v).unwrap_or(u32::MAX);
+
+    s.width = clamp32(scalar(s, rd, 256, 0));
+    s.height = clamp32(scalar(s, rd, 257, 0));
+    s.spp = trunc16(scalar(s, rd, 277, 1));
+    s.compression = trunc16(scalar(s, rd, 259, 1));
+    s.photometric = trunc16(scalar(s, rd, 262, 0xFFFF));
+    s.planar = trunc16(scalar(s, rd, 284, 1));
+    s.sample_format = trunc16(scalar(s, rd, 339, 1));
+    s.predictor = trunc16(scalar(s, rd, 317, 1));
+    s.fill_order = trunc16(scalar(s, rd, 266, 1));
     if let Some(e) = get(s, 274) {
-        s.orientation = Some(rd.scalar(&e).unwrap_or(0) as u16);
+        s.orientation = Some(trunc16(rd.scalar(&e).unwrap_or(0)));
     }
     if let Some(e) = get(s, 258) {
-        s.bits = rd.element(&e, 0).unwrap_or(0) as u16;
+        s.bits = trunc16(rd.element(&e, 0).unwrap_or(0));
         for i in 1..e.count.min(64) {
             if rd.element(&e, i).unwrap_or(0) != u64::from(s.bits) {
                 s.bits = 0; // 各聲道不同
@@ -433,7 +443,7 @@ fn scan_ifd(s: &mut TiffScan, rd: &mut Reader<'_, '_>, file_size: u64, lim: &Lim
     }
     if let Some(e) = get(s, 338) {
         for i in 0..e.count.min(64) {
-            s.extra_samples.push(rd.element(&e, i).unwrap_or(0) as u16);
+            s.extra_samples.push(trunc16(rd.element(&e, i).unwrap_or(0)));
         }
     }
     s.subifds = get(s, 330).is_some();
@@ -447,8 +457,8 @@ fn scan_ifd(s: &mut TiffScan, rd: &mut Reader<'_, '_>, file_size: u64, lim: &Lim
     let (offs, cnts);
     let mut expected: u64;
     if s.tiled {
-        s.tile_width = scalar(s, rd, 322, 0) as u32;
-        s.tile_length = scalar(s, rd, 323, 0) as u32;
+        s.tile_width = trunc32(scalar(s, rd, 322, 0));
+        s.tile_length = trunc32(scalar(s, rd, 323, 0));
         offs = get(s, 324);
         cnts = get(s, 325);
         if s.tile_width == 0
@@ -468,7 +478,7 @@ fn scan_ifd(s: &mut TiffScan, rd: &mut Reader<'_, '_>, file_size: u64, lim: &Lim
         expected = across.wrapping_mul(down);
     } else {
         let rps = scalar(s, rd, 278, u64::from(u32::MAX));
-        s.rows_per_strip = (if rps == 0 { u64::from(u32::MAX) } else { rps }).min(u64::from(u32::MAX)) as u32;
+        s.rows_per_strip = if rps == 0 { u32::MAX } else { clamp32(rps) };
         offs = get(s, 273);
         cnts = get(s, 279);
         let eff = s.rows_per_strip.min(s.height);

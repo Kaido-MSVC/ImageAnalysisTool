@@ -328,7 +328,7 @@ fn read_directory(input: &Input<'_>, sc: &TiffScan, mem: &mut Mem, msgs: &mut Me
                     mem.free(16); // 原本的單一 strip 陣列
                     offsets = new_offs;
                     counts = new_counts;
-                    rows_per_strip = rps as u32;
+                    rows_per_strip = u32::try_from(rps).ok()?; // rps < td_rps（u32 範圍內），不會失敗
                 }
             }
         }
@@ -815,7 +815,7 @@ impl<'a> Decoder<'a> for TiffDecoder<'a> {
         if s.failed {
             return false;
         }
-        let y = s.rows as u32;
+        let y = s.next_row();
         match self.mode {
             Mode::Strips => {
                 let strip = y / self.rps;

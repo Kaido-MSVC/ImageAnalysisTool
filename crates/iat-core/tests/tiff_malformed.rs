@@ -18,7 +18,7 @@ fn write_temp(name: &str, bytes: &[u8]) -> PathBuf {
 fn classic(entries: &[(u16, u16, u32, u32)], tail: &[u8]) -> Vec<u8> {
     let mut f = b"II*\0".to_vec();
     f.extend_from_slice(&8u32.to_le_bytes());
-    f.extend_from_slice(&(entries.len() as u16).to_le_bytes());
+    f.extend_from_slice(&u16::try_from(entries.len()).expect("entry count fits in u16").to_le_bytes());
     for &(tag, typ, count, value) in entries {
         f.extend_from_slice(&tag.to_le_bytes());
         f.extend_from_slice(&typ.to_le_bytes());

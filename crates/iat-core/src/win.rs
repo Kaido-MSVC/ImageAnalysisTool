@@ -56,10 +56,17 @@ fn wide(s: &OsStr) -> Vec<u16> {
     s.encode_wide().chain(std::iter::once(0)).collect()
 }
 
+/// Win32 結構的大小（DWORD），填進 cb／dwLength 這類欄位。
+#[expect(clippy::cast_possible_truncation, reason = "Win32 結構大小遠小於 4 GiB")]
+const fn dword_size_of<T>() -> u32 {
+    std::mem::size_of::<T>() as u32
+}
+
 /// `"<code>: <英文系統訊息>"`，與 C++ 版 `win_error_text` 相同（固定用 en-US，不跟系統語言）。
 pub fn error_text(code: u32) -> String {
     const LANG_EN_US: u32 = 0x0409;
-    let mut buf = [0u16; 1024];
+    const BUF_CHARS: u32 = 1024;
+    let mut buf = [0u16; BUF_CHARS as usize];
     // SAFETY: buf 是可寫的 1024 個 u16；未使用 ALLOCATE_BUFFER，也不傳插入參數。
     let n = unsafe {
         FormatMessageW(
@@ -68,7 +75,7 @@ pub fn error_text(code: u32) -> String {
             code,
             LANG_EN_US,
             buf.as_mut_ptr(),
-            buf.len() as u32,
+            BUF_CHARS,
             std::ptr::null(),
         )
     } as usize;
@@ -78,7 +85,7 @@ pub fn error_text(code: u32) -> String {
 
 /// io::Error 的 Win32 錯誤碼；沒有時用 ERROR_GEN_FAILURE (31)。
 pub fn os_code(e: &std::io::Error) -> u32 {
-    e.raw_os_error().map_or(31, |c| c as u32)
+    e.raw_os_error().map_or(31, i32::cast_unsigned)
 }
 
 /// 磁碟區序號加 128 位元檔案 ID；硬連結與同一檔案的不同路徑會得到相同值。
@@ -90,7 +97,7 @@ pub fn file_identity(f: &File) -> Option<(u64, [u8; 16])> {
             f.as_raw_handle(),
             FileIdInfo,
             (&mut info as *mut FILE_ID_INFO).cast(),
-            std::mem::size_of::<FILE_ID_INFO>() as u32,
+            dword_size_of::<FILE_ID_INFO>(),
         )
     };
     (ok != 0).then_some((info.VolumeSerialNumber, info.FileId.Identifier))
@@ -110,7 +117,7 @@ pub fn disk_free_bytes(dir: &Path) -> Result<u64, u32> {
 /// 目前可用的實體記憶體（bytes，`GlobalMemoryStatusEx` 的 `ullAvailPhys`）；查詢失敗時為 None。
 /// GUI 用來判斷建議的 `job_commit_mib` 是否超過可用記憶體。
 pub fn available_physical_memory() -> Option<u64> {
-    let mut st = MEMORYSTATUSEX { dwLength: std::mem::size_of::<MEMORYSTATUSEX>() as u32, ..Default::default() };
+    let mut st = MEMORYSTATUSEX { dwLength: dword_size_of::<MEMORYSTATUSEX>(), ..Default::default() };
     // SAFETY: st 是本地變數，dwLength 已設為結構大小（API 的要求）。
     let ok = unsafe { GlobalMemoryStatusEx(&mut st) };
     (ok != 0).then_some(st.ullAvailPhys)
@@ -232,7 +239,7 @@ fn set_inheritable(h: RawHandle, on: bool) -> bool {
 /// CreatePipe 或設定繼承旗標失敗。
 pub fn pipe() -> Result<(File, OwnedHandle), SpawnError> {
     let sa = SECURITY_ATTRIBUTES {
-        nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+        nLength: dword_size_of::<SECURITY_ATTRIBUTES>(),
         lpSecurityDescriptor: std::ptr::null_mut(),
         bInheritHandle: 1,
     };
@@ -286,7 +293,7 @@ impl WorkerJob {
                 job.as_raw_handle() as HANDLE,
                 JobObjectExtendedLimitInformation,
                 (&li as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
-                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                dword_size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>(),
             )
         };
         if ok == 0 {
@@ -302,7 +309,7 @@ impl WorkerJob {
                 job.as_raw_handle() as HANDLE,
                 JobObjectAssociateCompletionPortInformation,
                 (&acp as *const JOBOBJECT_ASSOCIATE_COMPLETION_PORT).cast(),
-                std::mem::size_of::<JOBOBJECT_ASSOCIATE_COMPLETION_PORT>() as u32,
+                dword_size_of::<JOBOBJECT_ASSOCIATE_COMPLETION_PORT>(),
             )
         };
         if ok == 0 {
@@ -342,7 +349,7 @@ impl WorkerJob {
                 self.job.as_raw_handle() as HANDLE,
                 JobObjectExtendedLimitInformation,
                 (&mut li as *mut JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
-                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                dword_size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>(),
                 std::ptr::null_mut(),
             )
         };
@@ -354,7 +361,7 @@ impl WorkerJob {
                 self.job.as_raw_handle() as HANDLE,
                 JobObjectBasicAndIoAccountingInformation,
                 (&mut io as *mut JOBOBJECT_BASIC_AND_IO_ACCOUNTING_INFORMATION).cast(),
-                std::mem::size_of::<JOBOBJECT_BASIC_AND_IO_ACCOUNTING_INFORMATION>() as u32,
+                dword_size_of::<JOBOBJECT_BASIC_AND_IO_ACCOUNTING_INFORMATION>(),
                 std::ptr::null_mut(),
             )
         };
@@ -455,7 +462,7 @@ fn create_suspended(
     }
     // SAFETY: STARTUPINFOEXW 是純資料結構，全 0 是合法的初始值。
     let mut si: STARTUPINFOEXW = unsafe { std::mem::zeroed() };
-    si.StartupInfo.cb = std::mem::size_of::<STARTUPINFOEXW>() as u32;
+    si.StartupInfo.cb = dword_size_of::<STARTUPINFOEXW>();
     si.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
     si.StartupInfo.hStdInput = nul.as_raw_handle() as HANDLE;
     si.StartupInfo.hStdOutput = out_w.as_raw_handle() as HANDLE;
@@ -581,8 +588,9 @@ fn write_all_raw(h: HANDLE, data: &[u8]) {
     while done < data.len() {
         let mut n = 0u32;
         let rest = &data[done..];
-        // SAFETY: rest 指向有效的資料；n 指向本地變數；不使用 overlapped。h 無效時 WriteFile 只回傳失敗。
-        let ok = unsafe { WriteFile(h, rest.as_ptr(), rest.len() as u32, &mut n, std::ptr::null_mut()) };
+        let len = u32::try_from(rest.len()).unwrap_or(u32::MAX); // 超過 4 GiB 時分段寫
+        // SAFETY: rest 指向至少 len bytes 的有效資料；n 指向本地變數；不使用 overlapped。h 無效時 WriteFile 只回傳失敗。
+        let ok = unsafe { WriteFile(h, rest.as_ptr(), len, &mut n, std::ptr::null_mut()) };
         if ok == 0 || n == 0 {
             break;
         }

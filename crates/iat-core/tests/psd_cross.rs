@@ -14,7 +14,7 @@ struct Lcg(u64);
 impl Lcg {
     fn next(&mut self) -> u8 {
         self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-        (self.0 >> 33) as u8
+        (self.0 >> 33).to_le_bytes()[0] // 取低 8 位元
     }
 }
 
@@ -43,7 +43,7 @@ fn build(s: &Spec, planar: &[u8], palette: &[u8]) -> Vec<u8> {
     f.extend_from_slice(&s.width.to_be_bytes());
     f.extend_from_slice(&s.depth.to_be_bytes());
     f.extend_from_slice(&s.mode.to_be_bytes());
-    f.extend_from_slice(&(palette.len() as u32).to_be_bytes());
+    f.extend_from_slice(&u32::try_from(palette.len()).expect("palette length fits in u32").to_be_bytes());
     f.extend_from_slice(palette);
     f.extend_from_slice(&0u32.to_be_bytes()); // 影像資源
     if s.psb {

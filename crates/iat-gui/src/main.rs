@@ -119,6 +119,11 @@ impl Progress for GuiProgress {
             return;
         }
         *last = Some(now);
+        #[expect(
+            clippy::cast_precision_loss,
+            clippy::cast_possible_truncation,
+            reason = "進度條比例只供顯示，精度足夠"
+        )]
         let frac = if total == 0 { 0.0 } else { (done as f64 / total as f64) as f32 };
         let st = if stage == Stage::Hash { 0 } else { 1 };
         post(&self.ui, move |ui| {
@@ -398,7 +403,9 @@ fn pick_file(title: &str) -> Option<PathBuf> {
 }
 
 fn select_language(ui: &AppWindow, language: usize) {
-    ui.set_language(language as i32);
+    #[expect(clippy::cast_possible_truncation, clippy::cast_possible_wrap, reason = "語言索引只有 0..3")]
+    let index = language as i32;
+    ui.set_language(index);
     // 找不到的語系 Slint 會維持目前的語言；三個都是內建的，失敗只可能是建置設定錯誤。
     if let Err(e) = slint::select_bundled_translation(display::translation_name(language)) {
         eprintln!("iat-gui: cannot select translation: {e:?}");

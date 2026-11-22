@@ -28,7 +28,7 @@ pub const DECODER_NAME: &str = "png";
 pub const DECODER_VERSION: &str = "0.18.1";
 
 fn layout_for(depth: i32, ctype: i32, has_trns: bool) -> RowLayout {
-    let d = depth as u32;
+    let d = depth.cast_unsigned();
     match ctype {
         0 => RowLayout::new(if has_trns { "gray_alpha" } else { "gray" }, if has_trns { 2 } else { 1 }, d),
         2 => RowLayout::new(if has_trns { "rgba" } else { "rgb" }, if has_trns { 4 } else { 3 }, d),
@@ -64,7 +64,8 @@ fn pass_rows(h: u32, p: usize) -> u32 {
 /// 一側 PNG 逐列解碼所需的工具緩衝（同 C++ 版 `png_row_budget`）。
 pub fn png_row_budget(width: u32, bit_depth: i32, color_type: i32, has_trns: bool) -> Option<u64> {
     let l = layout_for(bit_depth, color_type, has_trns);
-    let bits = u64::from(width).checked_mul(png_channels(color_type))?.checked_mul(bit_depth as u64)?;
+    let bits =
+        u64::from(width).checked_mul(png_channels(color_type))?.checked_mul(u64::from(bit_depth.cast_unsigned()))?;
     if l.channels == 0 {
         return None;
     }
@@ -368,9 +369,9 @@ impl<'a> PngDecoder<'a> {
     /// 一列原始資料（未轉換）展開成正規樣本（同 C++ 版 `expand_row`）。
     fn expand_row(&mut self, canon: &mut [u16], layout: &RowLayout, width: u32) {
         let row = &self.raw;
-        let depth = self.scan.bit_depth as u32;
+        let depth = self.scan.bit_depth.cast_unsigned();
         let ct = self.scan.color_type;
-        let in_ch = png_channels(ct) as usize;
+        let in_ch = u64_to_usize(png_channels(ct));
         let out_ch = layout.channels as usize;
         let packed = |i: usize| -> u32 {
             match depth {
@@ -378,14 +379,17 @@ impl<'a> PngDecoder<'a> {
                 8 => u32::from(row[i]),
                 d => {
                     let bit = i * d as usize;
-                    let shift = 8 - d - (bit & 7) as u32;
+                    let shift = 8 - d as usize - (bit & 7);
                     (u32::from(row[bit >> 3]) >> shift) & ((1 << d) - 1)
                 }
             }
         };
         let lib = &self.scan.lib;
         let npal = lib.palette.len() / 3;
+        #[expect(clippy::cast_possible_truncation, reason = "layout.bits ≤ 16")]
         let maxv = ((1u32 << layout.bits) - 1) as u16;
+        #[expect(clippy::cast_possible_truncation, reason = "PNG 樣本最多 16 位元")]
+        let sample = |i: usize| packed(i) as u16;
         for x in 0..width as usize {
             let px = &mut canon[x * out_ch..(x + 1) * out_ch];
             if ct == 3 {
@@ -403,7 +407,7 @@ impl<'a> PngDecoder<'a> {
                 }
             } else {
                 for (c, v) in px[..in_ch].iter_mut().enumerate() {
-                    *v = packed(x * in_ch + c) as u16;
+                    *v = sample(x * in_ch + c);
                 }
                 if in_ch < out_ch {
                     // tRNS 色鍵 -> alpha（libpng 拒收的 tRNS 不算色鍵，全部不透明）
@@ -419,7 +423,7 @@ impl<'a> PngDecoder<'a> {
     fn pack(&mut self, src: &[u16]) {
         if self.bps == 1 {
             for (d, &v) in self.store.iter_mut().zip(src) {
-                *d = v as u8;
+                *d = v.to_le_bytes()[0]; // 8 位元樣本，只取低位元組
             }
         } else {
             for (i, &v) in src.iter().enumerate() {
@@ -434,7 +438,7 @@ impl<'a> PngDecoder<'a> {
         let ch = s.layout.channels as usize;
         let total_rows: u64 = (0..7).filter(|&p| pass_cols(w, p) > 0).map(|p| u64::from(pass_rows(h, p))).sum();
         let mut read = 0u64;
-        for p in 0..7 {
+        for (p, pass) in (1u8..=7).enumerate() {
             let (pw, ph) = (pass_cols(w, p), pass_rows(h, p));
             if pw == 0 || ph == 0 {
                 continue; // png crate 也跳過空的 pass
@@ -447,7 +451,7 @@ impl<'a> PngDecoder<'a> {
                     return self.fail(s, issues, Failure::Decode, m, place, read > 0);
                 }
                 match self.next_raw() {
-                    Ok(Some(InterlaceInfo::Adam7(a))) if a == Adam7Info::new(p as u8 + 1, ry, w) => {}
+                    Ok(Some(InterlaceInfo::Adam7(a))) if a == Adam7Info::new(pass, ry, w) => {}
                     Ok(other) => {
                         s.failed = true;
                         s.rep.decode_status = if read > 0 { "partial" } else { "failed" }.into();
@@ -497,7 +501,7 @@ impl<'a> PngDecoder<'a> {
     /// 從包含這一列的各個 pass 重建影像第 s.rows 列；每一欄必須剛好填一次。
     fn reconstruct_row(&mut self, s: &mut SideState<'_>, issues: &mut Vec<Issue>) -> bool {
         let ch = s.layout.channels as usize;
-        let y = s.rows as u32;
+        let y = s.next_row();
         let w = self.scan.width;
         let mut filled = 0u64;
         for p in 0..7 {
@@ -597,7 +601,8 @@ impl<'a> Decoder<'a> for PngDecoder<'a> {
             return false;
         }
         let sc = &self.scan;
-        let rb = (u64::from(sc.width) * png_channels(sc.color_type) * sc.bit_depth as u64).div_ceil(8);
+        let rb =
+            (u64::from(sc.width) * png_channels(sc.color_type) * u64::from(sc.bit_depth.cast_unsigned())).div_ceil(8);
         let mut opts = DecodeOptions::default();
         // Adler-32 由 png_scan 獨立檢查（D-R11）：png crate 若自己檢查，小圖會在第一列之前就失敗。
         opts.set_ignore_adler32(true);
@@ -820,7 +825,8 @@ impl<'a> Decoder<'a> for PngDecoder<'a> {
 
 /// IDAT 解壓後應有的位元組數（每列加一個濾波位元組）。
 fn expected_idat_bytes(sc: &PngScan) -> u64 {
-    let row = |w: u32| (u64::from(w) * png_channels(sc.color_type) * sc.bit_depth as u64).div_ceil(8) + 1;
+    let depth = u64::from(sc.bit_depth.cast_unsigned());
+    let row = |w: u32| (u64::from(w) * png_channels(sc.color_type) * depth).div_ceil(8) + 1;
     if sc.interlace == 1 {
         (0..7)
             .filter(|&p| pass_cols(sc.width, p) > 0)
@@ -869,7 +875,7 @@ pub fn prepare_png<'a>(
     fr.coverage.rows_total = u64::from(sc.height);
     let sm = &mut fr.sample_model;
     sm.model = s.layout.model.into();
-    sm.container_bits = sc.bit_depth as u32;
+    sm.container_bits = sc.bit_depth.cast_unsigned();
     sm.channel_bits = vec![s.layout.bits; s.layout.channels as usize];
     sm.compare_type = match s.layout.bits {
         16 => "uint16",
@@ -910,7 +916,7 @@ pub fn prepare_png<'a>(
         } else if o == 0 {
             fr.orientation = Orientation { source: "default".into(), value: 1 };
         } else {
-            fr.orientation = Orientation { source: "exif".into(), value: o as u32 };
+            fr.orientation = Orientation { source: "exif".into(), value: o.cast_unsigned() };
         }
     } else {
         fr.orientation = Orientation { source: "default".into(), value: 1 };

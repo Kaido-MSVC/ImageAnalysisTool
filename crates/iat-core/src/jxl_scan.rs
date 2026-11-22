@@ -246,7 +246,7 @@ fn walk(s: &mut JxlScan, rd: &mut Reader<'_, '_>, lim: &Limits) {
                 corrupt(s, code::TRUNCATED, "jxlp index is missing".into());
                 return;
             }
-            let idx = be(&b) as u32;
+            let idx = u32::from_be_bytes(b);
             if idx & 0x7FFF_FFFF != expected_part {
                 corrupt(
                     s,

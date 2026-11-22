@@ -27,7 +27,7 @@ fn first(s: &iat_core::jxl_scan::JxlScan) -> (&str, &str) {
 }
 
 fn boxed(ty: &[u8; 4], payload: &[u8]) -> Vec<u8> {
-    let mut b = ((payload.len() + 8) as u32).to_be_bytes().to_vec();
+    let mut b = u32::try_from(payload.len() + 8).expect("box size fits in u32").to_be_bytes().to_vec();
     b.extend_from_slice(ty);
     b.extend_from_slice(payload);
     b

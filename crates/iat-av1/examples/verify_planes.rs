@@ -52,7 +52,7 @@ fn parse(b: &[u8]) -> Option<Items> {
     let mut it = Items { primary: 0, locs: Vec::new(), auxl_to: Vec::new() };
     for (t, s, e) in boxes(b, ms + 4, me) {
         match &t {
-            b"pitm" => it.primary = be(b, s + 4, if b[s] == 0 { 2 } else { 4 })? as u32,
+            b"pitm" => it.primary = u32::try_from(be(b, s + 4, if b[s] == 0 { 2 } else { 4 })?).ok()?,
             b"iloc" => {
                 let v = b[s];
                 let (os, ls, bs) = (b[s + 4] >> 4, b[s + 4] & 15, b[s + 5] >> 4);
@@ -95,17 +95,17 @@ fn parse(b: &[u8]) -> Option<Items> {
                         p += ls as usize;
                         ext.push((base.checked_add(o)?, l));
                     }
-                    it.locs.push((id as u32, ext));
+                    it.locs.push((u32::try_from(id).ok()?, ext));
                 }
             }
             b"iref" => {
                 let w = if b[s] == 0 { 2 } else { 4 };
                 for (rt, rs, _) in boxes(b, s + 4, e) {
-                    let from = be(b, rs, w)? as u32;
+                    let from = u32::try_from(be(b, rs, w)?).ok()?;
                     let n = usize::try_from(be(b, rs + w, 2)?).ok()?;
                     if &rt == b"auxl" {
                         for i in 0..n {
-                            it.auxl_to.push((from, be(b, rs + w + 2 + i * w, w)? as u32));
+                            it.auxl_to.push((from, u32::try_from(be(b, rs + w + 2 + i * w, w)?).ok()?));
                         }
                     }
                 }
@@ -153,13 +153,15 @@ fn read_dump(p: &Path) -> Option<Dump> {
 }
 
 /// libavif `avifLimitedToFullY` (reformat.c), applied by libavif to a limited-range alpha plane.
-fn limited_to_full(depth: u8, v: i32) -> i32 {
+#[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "clamped to 0..=full (≤ 4095)")]
+fn limited_to_full(depth: u8, v: u16) -> u16 {
     let (lo, hi, full) = match depth {
         8 => (16, 235, 255),
         10 => (64, 940, 1023),
         _ => (256, 3760, 4095),
     };
-    (((v - lo) * full + (hi - lo) / 2) / (hi - lo)).clamp(0, full)
+    let v = i32::from(v);
+    (((v - lo) * full + (hi - lo) / 2) / (hi - lo)).clamp(0, full) as u16
 }
 
 fn planes_of(pic: &iat_av1::Picture, alpha: bool) -> Vec<(u32, u32, Vec<u16>)> {
@@ -168,12 +170,12 @@ fn planes_of(pic: &iat_av1::Picture, alpha: bool) -> Vec<(u32, u32, Vec<u16>)> {
         .map(|&pl| {
             let (w, h) = pic.plane_size(pl);
             let mut s = vec![0u16; (w * h) as usize];
-            for (y, row) in s.chunks_exact_mut(w as usize).enumerate() {
-                pic.read_row(pl, y as u32, row);
+            for (y, row) in (0u32..).zip(s.chunks_exact_mut(w as usize)) {
+                pic.read_row(pl, y, row);
             }
             if alpha && !pic.full_range() {
                 for v in &mut s {
-                    *v = limited_to_full(pic.bit_depth(), i32::from(*v)) as u16;
+                    *v = limited_to_full(pic.bit_depth(), *v);
                 }
             }
             (w, h, s)

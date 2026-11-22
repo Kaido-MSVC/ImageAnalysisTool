@@ -363,7 +363,7 @@ fn scan_layers(rd: &mut Reader<'_, '_>, s: &mut PsdScan, start: u64, len: u64) {
             s.layers_known = false;
             return;
         }
-        s.layer_count_field = i32::from(be16(&b) as i16);
+        s.layer_count_field = i32::from(be16(&b).cast_signed());
         s.layer_count = s.layer_count_field.unsigned_abs();
     }
     pos = pos.wrapping_add(li_len);
@@ -419,7 +419,7 @@ fn scan_layers(rd: &mut Reader<'_, '_>, s: &mut PsdScan, start: u64, len: u64) {
         if matches!(key, b"Lr16" | b"Lr32" | b"Layr") && bl >= 2 {
             let mut b = [0u8; 2];
             if rd.bytes(data, &mut b) {
-                let n = be16(&b) as i16;
+                let n = be16(&b).cast_signed();
                 s.layer_count += u32::from(n.unsigned_abs());
                 if n < 0 && s.layer_count_field == 0 {
                     s.layer_count_field = i32::from(n);
@@ -472,17 +472,17 @@ impl<'a> PackBitsRow<'a> {
                 self.repeat_count = 0;
                 continue;
             }
-            let h = input[i] as i8;
+            let h = input[i].cast_signed();
             i += 1;
             if h >= 0 {
-                let k = h as usize + 1;
+                let k = usize::from(h.unsigned_abs()) + 1;
                 if k > size - self.o {
                     return Err("literal run overflows the row");
                 }
                 self.literal_left = k;
             } else if h != -128 {
                 // -128 是空操作標頭
-                let k = (1 - i32::from(h)) as usize;
+                let k = 1 + usize::from(h.unsigned_abs()); // h < 0：1 - h
                 if k > size - self.o {
                     return Err("repeat run overflows the row");
                 }

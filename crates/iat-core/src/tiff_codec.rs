@@ -13,6 +13,7 @@ use weezl::decode::Configuration;
 use weezl::{BitOrder, LzwError, LzwStatus};
 
 use crate::inflate::{ZInflater, ZState};
+use crate::u64_to_usize;
 
 /// 解碼器的錯誤與警告，各最多 32 則（同 C++ 版的 TiffIo）。
 #[derive(Clone, Debug, Default)]
@@ -139,10 +140,11 @@ pub fn packbits_decode(raw: &[u8], out: &mut [u8], row: u64, msgs: &mut Messages
     let mut bp = 0usize;
     let mut op = 0usize;
     while bp < raw.len() && op < out.len() {
-        let n = i64::from(raw[bp] as i8);
+        let n = i64::from(raw[bp].cast_signed());
         bp += 1;
-        let occ = (out.len() - op) as i64;
-        let cc = (raw.len() - bp) as i64;
+        // libtiff 的 tmsize_t 是有號數；slice 長度 ≤ isize::MAX，轉換不會失敗
+        let occ = i64::try_from(out.len() - op).unwrap_or(i64::MAX);
+        let cc = i64::try_from(raw.len() - bp).unwrap_or(i64::MAX);
         if n < 0 {
             if n == -128 {
                 continue; // nop
@@ -158,8 +160,9 @@ pub fn packbits_decode(raw: &[u8], out: &mut [u8], row: u64, msgs: &mut Messages
             }
             let b = raw[bp];
             bp += 1;
-            out[op..op + n as usize].fill(b);
-            op += n as usize;
+            let n = u64_to_usize(n.cast_unsigned()); // 2 ≤ n 或 n = occ ≥ 1
+            out[op..op + n].fill(b);
+            op += n;
         } else {
             let mut n = n;
             if occ < n + 1 {
@@ -170,7 +173,7 @@ pub fn packbits_decode(raw: &[u8], out: &mut [u8], row: u64, msgs: &mut Messages
                 msgs.warning(MODULE, "Terminating PackBitsDecode due to lack of data.");
                 break;
             }
-            let k = (n + 1) as usize;
+            let k = u64_to_usize((n + 1).cast_unsigned()); // n ≥ 0
             out[op..op + k].copy_from_slice(&raw[bp..bp + k]);
             op += k;
             bp += k;

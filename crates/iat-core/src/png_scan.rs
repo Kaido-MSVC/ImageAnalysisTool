@@ -252,7 +252,7 @@ pub fn exif_orientation(e: &[u8]) -> i32 {
                 return -1;
             }
             let v = u16_at(o + 8).unwrap_or(0);
-            return if (1..=8).contains(&v) { v as i32 } else { -1 };
+            return if (1..=8).contains(&v) { v.cast_signed() } else { -1 };
         }
     }
     0
@@ -1283,7 +1283,8 @@ mod tests {
         // libpng 要求 iCCP 至少 81 + LZ77Min bytes；短的測試資料補到夠長（補在壓縮資料之後）
         let mut padded = p.clone();
         padded.resize(p.len().max(100), 0);
-        libpng_iccp(&mut lib, &st, Phase::BeforeIdat, padded.len() as u32, Some(&padded));
+        let len = u32::try_from(padded.len()).expect("test ICC payload fits in u32");
+        libpng_iccp(&mut lib, &st, Phase::BeforeIdat, len, Some(&padded));
         lib
     }
 

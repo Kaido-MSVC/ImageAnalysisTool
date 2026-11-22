@@ -403,6 +403,7 @@ fn scan_into(s: &mut WebpScan, rd: &mut Reader<'_, '_>, file_size: u64, lim: &Li
 /// 唯一的修改是把 VP8L 標頭的 alpha_is_used 位元設為 1。image-webp 解碼位元串流時不使用這個位元，
 /// 只拿它決定要不要丟掉 alpha；設為 1 才能一律拿到完整的 RGBA（D-R15）。內容不到 5 bytes
 /// （放不下標頭）時照原樣包裝，由解碼器回報錯誤。
+#[expect(clippy::cast_possible_truncation, reason = "payload 是 RIFF 內的 chunk：12 + 長度 + 補齊 ≤ RIFF 大小（u32）")]
 pub fn vp8l_decoder_input(mut payload: Vec<u8>) -> Vec<u8> {
     if payload.len() >= 5 {
         payload[4] |= 0x10;

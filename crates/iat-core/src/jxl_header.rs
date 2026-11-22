@@ -24,6 +24,12 @@ impl Bits<'_> {
         }
         Ok(v)
     }
+    /// 讀 `n` ≤ 32 位元並回傳 u32。
+    #[expect(clippy::cast_possible_truncation, reason = "n ≤ 32 位元，值放得進 u32")]
+    fn read_u32(&mut self, n: usize) -> Result<u32, HeaderError> {
+        debug_assert!(n <= 32, "read_u32 reads at most 32 bits, got {n}");
+        self.read(n).map(|v| v as u32)
+    }
     fn flag(&mut self) -> Result<bool, HeaderError> {
         Ok(self.read(1)? == 1)
     }
@@ -38,11 +44,11 @@ enum D {
 }
 
 fn u32c(b: &mut Bits<'_>, d: [D; 4]) -> Result<u32, HeaderError> {
-    let sel = b.read(2)? as usize;
+    let sel = b.read_u32(2)? as usize;
     match d.get(sel).copied().ok_or(HeaderError)? {
         D::Val(v) => Ok(v),
-        D::Bits(n) => Ok(b.read(n)? as u32),
-        D::Off(n, off) => (b.read(n)? as u32).checked_add(off).ok_or(HeaderError),
+        D::Bits(n) => b.read_u32(n),
+        D::Off(n, off) => b.read_u32(n)?.checked_add(off).ok_or(HeaderError),
     }
 }
 
@@ -63,7 +69,7 @@ fn bit_depth(b: &mut Bits<'_>) -> Result<BitDepth, HeaderError> {
     let float = b.flag()?;
     if float {
         let bits = u32c(b, [D::Val(32), D::Val(16), D::Val(24), D::Off(6, 1)])?;
-        let exponent_bits = b.read(4)? as u32 + 1;
+        let exponent_bits = b.read_u32(4)? + 1;
         Ok(BitDepth { bits, exponent_bits })
     } else {
         Ok(BitDepth { bits: u32c(b, [D::Val(8), D::Val(10), D::Val(12), D::Off(6, 1)])?, exponent_bits: 0 })
@@ -107,7 +113,7 @@ impl Header {
 
 fn size_dim(b: &mut Bits<'_>, small: bool) -> Result<u32, HeaderError> {
     if small {
-        Ok((b.read(5)? as u32 + 1) * 8)
+        Ok((b.read_u32(5)? + 1) * 8)
     } else {
         u32c(b, [D::Bits(9), D::Bits(13), D::Bits(18), D::Bits(30)])?.checked_add(1).ok_or(HeaderError)
     }
@@ -212,7 +218,7 @@ pub fn parse(codestream: &[u8]) -> Result<Header, HeaderError> {
     }
     if b.flag()? {
         // extra_fields
-        h.orientation = b.read(3)? as u32 + 1;
+        h.orientation = b.read_u32(3)? + 1;
         if b.flag()? {
             size_header(&mut b)?; // intrinsic size
         }

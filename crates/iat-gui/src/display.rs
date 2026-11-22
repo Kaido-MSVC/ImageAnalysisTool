@@ -7,6 +7,7 @@ use iat_core::DecodedImage;
 use slint::{Rgba8Pixel, SharedPixelBuffer};
 
 /// 把 0..2^bits-1 的值四捨五入換算成 0..255。
+#[expect(clippy::cast_possible_truncation, reason = "v ≤ max，結果 ≤ 255")]
 fn to8(v: u16, bits: u32) -> u8 {
     let max = (1u32 << bits) - 1;
     ((u32::from(v) * 255 + max / 2) / max) as u8
@@ -67,6 +68,7 @@ fn heat(d: u32, max: u32) -> Rgba8Pixel {
     }
     let t = ((1.0 + f64::from(d)).ln() / (1.0 + f64::from(max)).ln()).clamp(0.0, 1.0);
     let t = 0.2 + 0.8 * t;
+    #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "已 clamp 到 0..=255")]
     let ramp = |x: f64| (x.clamp(0.0, 1.0) * 255.0).round() as u8;
     Rgba8Pixel { r: ramp(t * 3.0), g: ramp(t * 3.0 - 1.0), b: ramp(t * 3.0 - 2.0), a: 255 }
 }
@@ -109,11 +111,12 @@ pub fn half(src: &SharedPixelBuffer<Rgba8Pixel>, mode: Reduce) -> SharedPixelBuf
     let mut out = SharedPixelBuffer::<Rgba8Pixel>::new(nw, nh);
     let sp = src.as_slice();
     let at = |x: u32, y: u32| sp[(y.min(h - 1) * w + x.min(w - 1)) as usize];
-    for (i, px) in out.make_mut_slice().iter_mut().enumerate() {
-        let (x, y) = (i as u32 % nw * 2, i as u32 / nw * 2);
+    for (i, px) in (0u32..).zip(out.make_mut_slice().iter_mut()) {
+        let (x, y) = (i % nw * 2, i / nw * 2);
         let q = [at(x, y), at(x + 1, y), at(x, y + 1), at(x + 1, y + 1)];
         *px = match mode {
             Reduce::Average => {
+                #[expect(clippy::cast_possible_truncation, reason = "四個 u8 的平均 ≤ 255")]
                 let avg = |f: fn(&Rgba8Pixel) -> u8| ((q.iter().map(|p| u32::from(f(p))).sum::<u32>() + 2) / 4) as u8;
                 Rgba8Pixel { r: avg(|p| p.r), g: avg(|p| p.g), b: avg(|p| p.b), a: avg(|p| p.a) }
             }
