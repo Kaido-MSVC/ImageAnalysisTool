@@ -237,8 +237,8 @@ pub(crate) fn run_worker<T: Send>(
     run
 }
 
-/// 讀到 EOF；超過 `cap` 的部分丟掉並標記。
-pub(crate) fn read_capped(f: &mut File, cap: usize) -> (Vec<u8>, bool) {
+/// 讀到 EOF；超過 `cap` 之後的內容全部丟掉並標記（不會再接上後面較小的片段）。
+pub(crate) fn read_capped(f: &mut impl Read, cap: usize) -> (Vec<u8>, bool) {
     let mut out = Vec::new();
     let mut overflow = false;
     let mut buf = vec![0u8; 64 << 10];
@@ -246,7 +246,7 @@ pub(crate) fn read_capped(f: &mut File, cap: usize) -> (Vec<u8>, bool) {
         match f.read(&mut buf) {
             Ok(0) | Err(_) => break,
             Ok(n) => {
-                if out.len() + n <= cap {
+                if !overflow && out.len() + n <= cap {
                     out.extend_from_slice(&buf[..n]);
                 } else {
                     overflow = true;
@@ -814,6 +814,29 @@ mod tests {
         let e = o.error.unwrap_or_else(|| panic!("{why}: accepted {header}"));
         assert!(e.starts_with("view header is invalid"), "{why}: {e}");
         assert_eq!(o.samples.capacity(), 0, "{why}: no sample buffer");
+    }
+
+    /// 每次 read 只交出一塊的讀取端（模擬管線）。
+    struct Chunks(Vec<Vec<u8>>);
+
+    impl Read for Chunks {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            if self.0.is_empty() {
+                return Ok(0);
+            }
+            let c = self.0.remove(0);
+            buf[..c.len()].copy_from_slice(&c);
+            Ok(c.len())
+        }
+    }
+
+    #[test]
+    fn capped_read_stops_appending_after_overflow() {
+        // 4 + 8 超過上限 10；之後的 3 bytes 雖然放得下，也不能接上去
+        let mut r = Chunks(vec![b"abcd".to_vec(), b"efghijkl".to_vec(), b"xyz".to_vec()]);
+        assert_eq!(read_capped(&mut r, 10), (b"abcd".to_vec(), true));
+        let mut r = Chunks(vec![b"abcd".to_vec(), b"ef".to_vec()]);
+        assert_eq!(read_capped(&mut r, 10), (b"abcdef".to_vec(), false));
     }
 
     #[test]
