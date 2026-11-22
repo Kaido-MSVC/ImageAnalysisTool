@@ -61,12 +61,65 @@ windows-sys = { version = "0.61.2", features = [
     "Win32_System_Threading",
 ] }
 
+# 既有設定（unsafe_code、let_underscore_must_use）保留；其餘合併自
+# D:\tools\rust-lints-app.toml（BeautifulRust 應用程式版）。
 [workspace.lints.rust]
 unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "warn"
+missing_debug_implementations = "warn"
+unreachable_pub = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
 
 [workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+
 # `let _ = 會失敗的呼叫` 會默默丟掉錯誤；要丟就明說理由。
 let_underscore_must_use = "warn"
+
+# Panic
+unwrap_used = "warn"
+expect_used = "allow"
+panic_in_result_fn = "warn"
+missing_assert_message = "warn"
+
+# 抑制要附理由
+allow_attributes = "warn"
+allow_attributes_without_reason = "warn"
+
+# unsafe
+undocumented_unsafe_blocks = "warn"
+multiple_unsafe_ops_per_block = "warn"
+
+# API 形狀
+fn_params_excessive_bools = "warn"
+struct_excessive_bools = "warn"
+clone_on_ref_ptr = "warn"
+redundant_clone = "warn"
+rc_buffer = "warn"
+
+# 慣用寫法
+string_add = "warn"
+wildcard_imports = "warn"
+
+# 除錯殘留
+dbg_macro = "warn"
+todo = "warn"
+
+# 可能遺失資訊的轉型
+# 影像運算大量使用 `as`；本專案只靠下面三個 cast_* 抓真正會遺失資訊的轉型
+as_conversions = "allow"
+cast_possible_truncation = "warn"
+cast_sign_loss = "warn"
+
+# pedantic 中雜訊較多的項目
+module_name_repetitions = "allow"
+# 應用程式，不對外發佈 API
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+module_inception = "allow"
+enum_glob_use = "allow"
 
 [profile.release]
 lto = true

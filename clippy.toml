@@ -1,0 +1,9 @@
+# BeautifulRust clippy configuration. Copy to your crate or workspace root, next to
+# Cargo.toml, alongside the [lints] block from lints.toml.
+
+# max-fn-params-bools 用 clippy 預設值（本專案決定，不沿用範本的 0）。
+
+# Allow unwrap, expect, and printing in tests, where a panic is the assertion.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-print-in-tests = true

@@ -484,6 +484,12 @@ C++ 版的訊息 `image resource 0x<id> name runs past the resource section` 在
   - 「像素一致」：compare、strict 為 `indeterminate`、samples 為 `equal`、原因只有 `color_unverified` 時的 GUI 標題，顏色介於成功與警告之間，下方寫出雙方的色彩來源；strict 判定與退出碼照常顯示。報告、JSON 與退出碼不變（GUI 匯出的 JSON 和 CLI 相同，已實測兩組）。
   - 色彩欄的 `jxl_enum` 後面加上色彩空間名稱（依 libjxl 的列舉值，例如 `sRGB`、`Display P3`、`Rec. 2100 PQ`，其餘組合寫出白點／原色／轉換函數）。
 
+### D-R21 Clippy lint：套用 BeautifulRust 應用程式版（2026-11-22）
+
+- `[workspace.lints]` 合併 `D:\tools\rust-lints-app.toml`（含 `clippy::pedantic`），保留既有的 `unsafe_code = "deny"` 與 `let_underscore_must_use`；`clippy.toml` 取自 BeautifulRust。
+- 本專案的調整：`as_conversions = "allow"`（影像運算大量使用 `as`，改由 `cast_possible_truncation`、`cast_sign_loss` 等 cast_* 抓真正會遺失資訊的轉型）；`missing_errors_doc`、`missing_panics_doc` 設為 allow（應用程式，不對外發佈 API）；`max-fn-params-bools` 用 clippy 預設值。
+- 修正原則：來自圖檔標頭的數值改用 `TryFrom`；已經 clamp 或範圍已檢查的值用 `#[expect(..., reason = "...")]` 註明理由；`cast_lossless` 以 `cargo clippy --fix` 處理。Slint 生成碼包在子模組內，以 `#[expect]` 排除。
+
 ## 允許的差異
 
 比對腳本讀這張表；表格以外的差異一律算失敗。欄位為 JSON 的點路徑，或 `exit`、`stderr`、`markdown`；可用 `*` 萬用字元。
