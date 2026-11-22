@@ -24,7 +24,15 @@ use slint::{ComponentHandle, Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, Shar
 
 mod ui {
     // Slint 產生的程式碼：lint 例外只開在這裡。
-    #![allow(clippy::let_underscore_must_use)]
+    #![expect(
+        clippy::let_underscore_must_use,
+        clippy::unwrap_used,
+        clippy::clone_on_ref_ptr,
+        clippy::todo,
+        unreachable_pub,
+        missing_debug_implementations,
+        reason = "Slint 生成碼，不能修改"
+    )]
     slint::include_modules!();
 }
 use ui::{AppWindow, FileInfo, IssueRow, MetaRow, ResultInfo};
