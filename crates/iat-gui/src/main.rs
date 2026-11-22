@@ -10,7 +10,7 @@ mod summary;
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::Mutex;
+use std::sync::{Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use iat_core::markdown::render_markdown;
@@ -92,6 +92,35 @@ thread_local! {
 
 fn with_state<R>(f: impl FnOnce(&mut AppState) -> R) -> R {
     STATE.with(|s| f(&mut s.borrow_mut()))
+}
+
+/// 進行中的背景工作（分析與檢視解碼）的數量；結束程式前等它們收尾。
+/// 只是計數器，沒有會被 panic 破壞的不變式，所以鎖中毒時照樣使用（Drop 裡也不能再 panic）。
+static BACKGROUND: (Mutex<usize>, Condvar) = (Mutex::new(0), Condvar::new());
+
+/// 在背景執行緒執行 `f`，並計入 [`BACKGROUND`]（含 panic 時）。
+fn spawn_background(f: impl FnOnce() + Send + 'static) {
+    struct Done;
+    impl Drop for Done {
+        fn drop(&mut self) {
+            let (count, cv) = &BACKGROUND;
+            *count.lock().unwrap_or_else(std::sync::PoisonError::into_inner) -= 1;
+            cv.notify_all();
+        }
+    }
+    *BACKGROUND.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner) += 1;
+    std::thread::spawn(move || {
+        let _done = Done;
+        f();
+    });
+}
+
+/// 最多等 `limit`，直到背景工作都結束；回傳是否都結束了。
+fn wait_background(limit: Duration) -> bool {
+    let (count, cv) = &BACKGROUND;
+    let guard = count.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let (guard, _) = cv.wait_timeout_while(guard, limit, |n| *n > 0).unwrap_or_else(std::sync::PoisonError::into_inner);
+    *guard == 0
 }
 
 /// 從背景執行緒把工作送回 UI 執行緒。事件迴圈已結束（視窗關閉）時送不到，結果也沒有人要看，直接放棄。
@@ -271,7 +300,7 @@ fn run_request(ui: &AppWindow, req: RunRequest, raised: Option<u64>) {
     ui.set_cancelling(false);
     ui.set_page(1);
     let weak = ui.as_weak();
-    std::thread::spawn(move || {
+    spawn_background(move || {
         let progress = GuiProgress { ui: weak.clone(), last: Mutex::new(None) };
         let report = run_analysis(&req, &cancel, &progress);
         post(&weak, move |ui| show_report(&ui, req, report, raised));
@@ -358,7 +387,7 @@ fn enter_viewer(ui: &AppWindow) {
     ui.set_view_state(view_state::LOADING);
     ui.set_probe_text(SharedString::new());
     let weak = ui.as_weak();
-    std::thread::spawn(move || {
+    spawn_background(move || {
         let res = load_view(&req, &cancel);
         post(&weak, move |ui| {
             // 期間又跑了另一次分析或重新進入檢視：丟掉過時的結果。
@@ -593,5 +622,17 @@ fn main() -> Result<(), slint::PlatformError> {
         ui.set_probe_text(text.into());
     });
 
-    ui.run()
+    let result = ui.run();
+    // 視窗關了：取消進行中的分析與檢視（worker 隨 Job 結束、暫存檔隨 handle 關閉刪除），
+    // 再給背景執行緒一點時間收尾，不靠程序結束時強制終止它們。
+    with_state(|s| {
+        if let Some(c) = s.cancel.take() {
+            c.cancel();
+        }
+        s.cancel_view();
+    });
+    if !wait_background(Duration::from_secs(2)) {
+        eprintln!("iat-gui: background work did not finish within 2 s after the window closed");
+    }
+    result
 }
