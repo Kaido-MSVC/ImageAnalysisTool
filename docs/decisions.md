@@ -489,6 +489,10 @@ C++ 版的訊息 `image resource 0x<id> name runs past the resource section` 在
 - `[workspace.lints]` 合併 `D:\tools\rust-lints-app.toml`（含 `clippy::pedantic`），保留既有的 `unsafe_code = "deny"` 與 `let_underscore_must_use`；`clippy.toml` 取自 BeautifulRust。
 - 本專案的調整：`as_conversions = "allow"`（影像運算大量使用 `as`，改由 `cast_possible_truncation`、`cast_sign_loss` 等 cast_* 抓真正會遺失資訊的轉型）；`missing_errors_doc`、`missing_panics_doc` 設為 allow（應用程式，不對外發佈 API）；`max-fn-params-bools` 用 clippy 預設值。
 - 修正原則：來自圖檔標頭的數值改用 `TryFrom`；已經 clamp 或範圍已檢查的值用 `#[expect(..., reason = "...")]` 註明理由；`cast_lossless` 以 `cargo clippy --fix` 處理。Slint 生成碼包在子模組內，以 `#[expect]` 排除。
+- 刻意比照 C++ `static_cast` 的截斷保留 `as`，理由一律寫「對照 C++ static_cast 截斷」；改變正負號的轉型用 `cast_signed()`／`cast_unsigned()`；位元讀取器的窄化集中在 `bits_u8`、`read_u8`、`read_u32` 等小函式。
+- 只支援 64 位元目標：iat-core 的 crate 根以 `compile_error!` 擋下其他目標。記憶體內算出的 u64 用 `u64_to_usize` 轉換；標頭讀到的長度與位移用 `usize::try_from`，並確認有 `checked_add` 與檔案大小（或緩衝長度）的範圍檢查。
+- 行為改變（實際輸出不變）：`win::write_all_raw` 遇到超過 4 GiB 的資料改為分段寫，原本的 `as u32` 會截斷；`webp_scan::vp8l_decoder_input` 在內容放不進 RIFF 的 32 位元大小欄位時回傳錯誤，不再截斷。兩者實際處理的資料都遠小於 4 GiB。
+- 以 `compare_iat.py` 對照 C++ 1.0.0：各類修正前後的 333 個案例都一致。
 
 ## 允許的差異
 

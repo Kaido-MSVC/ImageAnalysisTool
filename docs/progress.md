@@ -174,6 +174,16 @@ Nov 22, 2026 · @YU SIANG CHEN
 - [ ] 在 C++ repo 開 issue，記下上一節的問題
 - [ ] 決定是否把 `docs/jxl-rs-upstream-proposal.md` 提交給 jxl-rs 上游；上游支援後補做 `layered_image`
 
+**2.0.x／2.1.0：剩下的 clippy pedantic 警告**（D-R21；cast_* 已在 2026-11-22 清完）
+
+- [ ] `doc_markdown`（約 120 筆）：文件中的識別字補反引號，可批次處理
+- [ ] `unreachable_pub`（約 31 筆）：iat-gui 模組內的 `pub` 改為 `pub(crate)`，可用 `--fix`
+- [ ] `format_push_string`（約 30 筆）：`push_str(&format!(…))` 改為 `write!`
+- [ ] `missing_debug_implementations`（約 16 筆）：補 `#[derive(Debug)]` 或手寫 Debug
+- [ ] `borrow_as_ptr`（約 15 筆，集中在 `win.rs`）：改用 `&raw const`／`&raw mut`
+- [ ] 其餘約 170 筆（`many_single_char_names`、`map_unwrap_or`、`trivially_copy_pass_by_ref`、`assigning_clones` 等）：逐類評估，雜訊大的在 `[workspace.lints]` 設為 allow 並記理由
+- 每類修正後照例用 `compare_iat.py` 對照 C++ 1.0.0，分開提交
+
 **2.0.0 之後的新功能**
 
 - PSD/PSB 的 ZIP、CMYK、32-bit；若 IMB-C 1.4 輸出的 PSB 用到這些，列為第一優先
