@@ -7,3 +7,5 @@ __pycache__/
 /tests/compare/*.local.json
 /local-samples/
 /.claude/
+# 本機的專案規則（含本機路徑），不公開
+/CLAUDE.md
