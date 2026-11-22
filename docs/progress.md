@@ -102,7 +102,7 @@ Nov 22, 2026 · @YU SIANG CHEN
 - **Job 上限的報告形式**（D-R02 第四次修訂）：worker 在解碼器呼叫中配置失敗時，經通道告訴父程序是哪一側、哪個階段，父程序重跑一次把那一側照 C++ 版判為 `resource_limit`，報告其餘部分照常。C++ `run_e2e.py` 的 `job_commit_limit` 已加進比對腳本並一致；另用 C++ 建置產生的大圖（`--big`）驗證 JXL、WebP 的形式。C++ 版 `jxlbig_allocator`、`webpbig_job_limit` 的設定下 Rust 版用的記憶體較少、解碼完成，列為允許差異。
 - **版本 2.0.0**：`iat --version` 輸出 `iat 2.0.0`。
 - **程式圖示**：`assets/icons/`；winresource 0.1.34 把圖示與版本資訊嵌入三個執行檔，GUI 視窗也有圖示（D-R20）。
-- **封包**：`scripts/package.ps1` 產生 `dist\ImageAnalysisTool-2.0.0-win-x64.zip`。D-R22 修正後於 commit `4cd5412` 重新產生（SHA-256 `46fd260b583492040342b7c74d7e407e8c9a1cee82e5368620eb53ca3bc7550d`；先前的 `829a9436…d32` 作廢），THIRD_PARTY_NOTICES 重新產生後內容不變，dumpbin 確認三個執行檔的匯入表沒有 VC++／UCRT 的 DLL。三個執行檔都不匯入 VC++／UCRT 的 DLL；解壓到新資料夾後 CLI、worker（AVIF）與 GUI 都能直接執行，SHA256SUMS 全部相符。THIRD_PARTY_NOTICES 用 cargo-about 0.9.3 產生（2026-11-22 經同意安裝），含 libjxl ICC 資料表與 Slint 兩節。README（英文、繁中）與 CHANGELOG 新增。
+- **封包**：`scripts/package.ps1` 產生 `dist\ImageAnalysisTool-2.0.0-win-x64.zip`。D-R22 修正與 README 補上 `cpp-1.x` 說明後，於 commit `4419d2d` 重新產生（SHA-256 `447832afa82a4b4b890f7649d3bb4d56528d7273079cc8cddb9966516898c31a`；先前的 `829a9436…d32` 與 `46fd260b…550d` 作廢），THIRD_PARTY_NOTICES 重新產生後內容不變，dumpbin 確認三個執行檔的匯入表沒有 VC++／UCRT 的 DLL。三個執行檔都不匯入 VC++／UCRT 的 DLL；解壓到新資料夾後 CLI、worker（AVIF）與 GUI 都能直接執行，SHA256SUMS 全部相符。THIRD_PARTY_NOTICES 用 cargo-about 0.9.3 產生（2026-11-22 經同意安裝），含 libjxl ICC 資料表與 Slint 兩節。README（英文、繁中）與 CHANGELOG 新增。
 - **差異總表**：`docs/differences.md`，分成允許的差異、已知差異（未觸發）、刻意修正的錯誤處理、保留的 C++ 版問題、Rust 版新增功能，附封存 C++ 版前的參考。
 - **GUI**：記住介面語言；「以建議值（N MiB）重新分析」（12000×8637 PNG 對 JXL：建議 1536，重新分析後完成比對）；「像素一致」標題（未標記 PNG→JXL、WebP→PNG 兩組，匯出的 JSON 和 CLI 相同）；色彩欄顯示 `jxl_enum (sRGB)`。
 - **安全通報**：RUSTSEC-2026-0592（url 2.5.8，經 Slint）依新規則只升到 2.5.9（form_urlencoded 隨之升到 1.2.3）。
