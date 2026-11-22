@@ -1,5 +1,7 @@
 /target/
 /out/
+# scripts/package.ps1 的輸出
+/dist/
 __pycache__/
 # 本機專用：私人樣本與比對設定，不進 git
 /tests/compare/*.local.json

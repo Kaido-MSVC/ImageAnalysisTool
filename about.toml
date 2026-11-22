@@ -1,0 +1,30 @@
+# cargo-about 設定：產生 THIRD_PARTY_NOTICES.txt（scripts/gen_third_party.ps1）。
+# 只列編進執行檔的 crate：build-dependencies 與 dev-dependencies 不列（proc-macro 仍會列出）。
+# 允許清單同 deny.toml，順序是 OR 授權時選用的優先順序。
+#
+# Slint（LicenseRef-Slint-Royalty-free-2.0）：cargo-about 0.9.3 取不到 LicenseRef 的條文
+# （src/generate.rs 的篩選條件寫反，連 clarify 指定的檔案也會被略過），這 9 個 crate 因此不會出現在
+# 自動產生的清單裡，執行時會有「has no license file」的警告。條文改放 licenses/，about.hbs 固定列出
+# 這些 crate；Slint 升級時要同步改 about.hbs 的版本，並確認條文（SHA-256 記在 licenses/README.md）。
+accepted = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "BSL-1.0",
+    "Unicode-3.0",
+    "CC0-1.0",
+    "Unlicense",
+    "0BSD",
+    "NCSA",
+    # Slint：採用免版稅授權（deny.toml 的例外，D-R14）
+    "LicenseRef-Slint-Royalty-free-2.0",
+]
+targets = ["x86_64-pc-windows-msvc"]
+ignore-build-dependencies = true
+ignore-dev-dependencies = true
+# workspace 自己的 crate（publish = false，MIT，見 LICENSE）不列
+private = { ignore = true }

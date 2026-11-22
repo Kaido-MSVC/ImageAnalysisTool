@@ -9,6 +9,7 @@
 | rustc | 1.100.0 (0ef1bc386 2026-11-09) | `stable-x86_64-pc-windows-msvc`；workspace `rust-version = "1.100"`、edition 2024 |
 | cargo | 1.100.0 (3acc79c0c 2026-11-05) | |
 | cargo-deny | 0.21.0 | 2026-11-19 經同意以 `cargo install --locked cargo-deny` 安裝到 `%USERPROFILE%\.cargo\bin` |
+| cargo-about | 0.9.3 | 2026-11-22 經同意以 `cargo install --locked cargo-about --version 0.9.3 --features cli` 安裝到 `%USERPROFILE%\.cargo\bin`（0.9.3 的執行檔要開 `cli` feature）；產生 `THIRD_PARTY_NOTICES.txt`（`scripts/gen_third_party.ps1`，`--frozen`，不連網） |
 | Python | 3.13（`py -3.13 -I`） | 只跑比對腳本，只用標準函式庫 |
 
 建置設定：`.cargo/config.toml` 對 `x86_64-pc-windows-msvc` 設 `+crt-static`；release profile `lto = true`、`codegen-units = 1`。release 版 `iat.exe` 只匯入 KERNEL32、ntdll、bcrypt、dbghelp 與 api-ms-win-core-synch，沒有 VC++ 或 UCRT 執行階段 DLL。
