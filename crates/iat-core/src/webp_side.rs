@@ -16,6 +16,7 @@ use crate::png_scan::exif_orientation;
 use crate::report::{Count, DimensionPolicy, EffectiveColor, FileReport, Issue, MetaItem, Orientation, code};
 use crate::temp::{TempError, TempErrorKind};
 use crate::text::{sha256_hex, short_hash};
+use crate::u64_to_usize;
 use crate::webp_scan::{WebpScan, scan_webp, vp8l_decoder_input};
 
 pub const DECODER_NAME: &str = "image-webp";
@@ -78,22 +79,22 @@ impl<'a> WebpDecoder<'a> {
         // 檔案與 RGBA 緩衝：worker 在這裡配置失敗時照 C++ 版回報工具緩衝（engine::AllocStage）
         let tool_buffers = ToolBufferStage::enter();
         let mut payload = Vec::new();
-        if usize::try_from(len).ok().and_then(|n| payload.try_reserve_exact(n).ok()).is_none() {
+        let Some(n) = usize::try_from(len).ok().filter(|&n| payload.try_reserve_exact(n).is_ok()) else {
             self.fail_resource(s, issues, "buffers for the WebP file and its RGBA output could not be allocated");
             return None;
-        }
-        payload.resize(len as usize, 0);
+        };
+        payload.resize(n, 0);
         if !matches!(self.input.read_at(off, &mut payload), Ok(n) if n as u64 == len) {
             self.fail_decode(s, issues, "io_error", "reading the WebP file failed".into());
             return None;
         }
         let rgba_len = self.row_bytes() * u64::from(self.height);
         let mut rgba = Vec::new();
-        if usize::try_from(rgba_len).ok().and_then(|n| rgba.try_reserve_exact(n).ok()).is_none() {
+        let Some(n) = usize::try_from(rgba_len).ok().filter(|&n| rgba.try_reserve_exact(n).is_ok()) else {
             self.fail_resource(s, issues, "buffers for the WebP file and its RGBA output could not be allocated");
             return None;
-        }
-        rgba.resize(rgba_len as usize, 0);
+        };
+        rgba.resize(n, 0);
         drop(tool_buffers);
         let res = image_webp::WebPDecoder::new(Cursor::new(vp8l_decoder_input(payload))).and_then(|mut d| {
             if d.dimensions() != (self.width, self.height) || !d.has_alpha() {
@@ -172,7 +173,7 @@ impl<'a> Decoder<'a> for WebpDecoder<'a> {
             s.rep.sample_model.alpha = "none".into();
         }
         let temp = s.temp.as_mut().expect("reserve() succeeded on this temp file");
-        let rb = self.row_bytes() as usize;
+        let rb = u64_to_usize(self.row_bytes());
         let mut written = Ok(());
         for row in rgba.chunks_exact(rb) {
             written = temp.append(row);

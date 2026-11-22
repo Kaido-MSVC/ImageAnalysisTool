@@ -10,6 +10,7 @@ use crate::input::Input;
 use crate::limits::Limits;
 use crate::report::{Count, IccInfo, Issue, code};
 use crate::text::{file_text, hex, sha256_hex};
+use crate::u64_to_usize;
 
 /// 真實的 IFD 遠少於 100 個項目。
 const MAX_ENTRIES: u64 = 4096;
@@ -207,7 +208,7 @@ impl<'a, 'b> Reader<'a, 'b> {
         if dst.len() <= 16 {
             let cache_end = self.cache_at + self.cache.len() as u64;
             if off < self.cache_at || end > cache_end {
-                let want = (self.size - off).min(CACHE_BYTES as u64) as usize;
+                let want = usize::try_from(self.size - off).map_or(CACHE_BYTES, |n| n.min(CACHE_BYTES));
                 self.cache.resize(want, 0);
                 if !matches!(self.f.read_at(off, &mut self.cache), Ok(k) if k == want) {
                     self.cache.clear();
@@ -215,7 +216,7 @@ impl<'a, 'b> Reader<'a, 'b> {
                 }
                 self.cache_at = off;
             }
-            let start = (off - self.cache_at) as usize;
+            let start = u64_to_usize(off - self.cache_at);
             let Some(src) = self.cache.get(start..start + dst.len()) else { return false };
             dst.copy_from_slice(src);
         } else if !matches!(self.f.read_at(off, dst), Ok(k) if k == dst.len()) {
@@ -223,6 +224,12 @@ impl<'a, 'b> Reader<'a, 'b> {
         }
         self.scanned += n;
         true
+    }
+
+    /// 讀 `len` bytes 成新的 Vec；長度無法表示或超出檔案時回傳 None。
+    pub fn read_vec(&mut self, off: u64, len: u64) -> Option<Vec<u8>> {
+        let mut v = vec![0u8; usize::try_from(len).ok()?];
+        self.bytes(off, &mut v).then_some(v)
     }
 
     pub fn u(&self, p: &[u8]) -> u64 {
@@ -349,7 +356,7 @@ fn scan_ifd(s: &mut TiffScan, rd: &mut Reader<'_, '_>, file_size: u64, lim: &Lim
     }
     s.entry_count = n;
     // n ≤ 4096，下面的乘法不會溢位
-    let mut raw = vec![0u8; (n * ent_size) as usize + off_size];
+    let mut raw = vec![0u8; u64_to_usize(n * ent_size) + off_size];
     let body = s.ifd_offset.checked_add(cnt_size as u64);
     if !body.is_some_and(|b| rd.bytes(b, &mut raw)) {
         corrupt(s, code::TRUNCATED, "first IFD runs past the end of the file".into());
@@ -358,7 +365,7 @@ fn scan_ifd(s: &mut TiffScan, rd: &mut Reader<'_, '_>, file_size: u64, lim: &Lim
     let body = body.unwrap_or_default();
     let mut prev = 0u16;
     for i in 0..n {
-        let p = &raw[(i * ent_size) as usize..((i + 1) * ent_size) as usize];
+        let p = &raw[u64_to_usize(i * ent_size)..u64_to_usize((i + 1) * ent_size)];
         let tag = rd.u(&p[0..2]) as u16;
         let typ = rd.u(&p[2..4]) as u16;
         let count = if big { rd.u(&p[4..12]) } else { rd.u(&p[4..8]) };
@@ -393,7 +400,7 @@ fn scan_ifd(s: &mut TiffScan, rd: &mut Reader<'_, '_>, file_size: u64, lim: &Lim
         s.entries.push(e);
         s.tags.entry(tag).or_insert(e);
     }
-    s.next_ifd = rd.u(&raw[(n * ent_size) as usize..]);
+    s.next_ifd = rd.u(&raw[u64_to_usize(n * ent_size)..]);
     s.has_ifd = true;
 
     let get = |s: &TiffScan, tag: u16| s.tags.get(&tag).copied();
@@ -531,8 +538,7 @@ fn scan_ifd(s: &mut TiffScan, rd: &mut Reader<'_, '_>, file_size: u64, lim: &Lim
                 format!("ICC profile of {} bytes exceeds metadata_item_mib", e.bytes),
             );
         } else {
-            let mut icc = vec![0u8; e.bytes as usize];
-            if rd.bytes(e.value_offset, &mut icc) {
+            if let Some(icc) = rd.read_vec(e.value_offset, e.bytes) {
                 s.icc.status = "embedded".into();
                 s.icc.bytes = Some(Count(e.bytes));
                 s.icc.sha256 = sha256_hex(&icc);
@@ -555,11 +561,10 @@ fn scan_ifd(s: &mut TiffScan, rd: &mut Reader<'_, '_>, file_size: u64, lim: &Lim
             *status = "over_limit";
             return format!("bytes={} (over limit)", e.bytes);
         }
-        let mut b = vec![0u8; e.bytes as usize];
-        if !rd.bytes(e.value_offset, &mut b) {
+        let Some(b) = rd.read_vec(e.value_offset, e.bytes) else {
             *status = "parse_failed";
             return "unreadable".into();
-        }
+        };
         format!("bytes={} sha256={}", e.bytes, short_hex(&sha256_hex(&b)))
     };
     if let Some(e) = get(s, 700) {
@@ -574,8 +579,8 @@ fn scan_ifd(s: &mut TiffScan, rd: &mut Reader<'_, '_>, file_size: u64, lim: &Lim
             Some(off) if rd.bytes(off, &mut eb[..cnt_size]) => {
                 let en = rd.u(&eb[..cnt_size]);
                 let len = en.checked_mul(ent_size).filter(|_| en <= MAX_ENTRIES).unwrap_or(0);
-                let mut body = vec![0u8; len as usize];
-                if !body.is_empty() && rd.bytes(off + cnt_size as u64, &mut body) {
+                let body = if len == 0 { None } else { rd.read_vec(off + cnt_size as u64, len) };
+                if let Some(body) = body {
                     s.exif = Some(format!("exif_ifd entries={en} sha256={}", short_hex(&sha256_hex(&body))));
                 } else {
                     s.exif = Some("exif_ifd unreadable".into());
@@ -634,8 +639,7 @@ fn scan_ifd(s: &mut TiffScan, rd: &mut Reader<'_, '_>, file_size: u64, lim: &Lim
         && e.typ == 2
         && e.bytes <= 64
     {
-        let mut t = vec![0u8; e.bytes as usize];
-        if rd.bytes(e.value_offset, &mut t) {
+        if let Some(t) = rd.read_vec(e.value_offset, e.bytes) {
             let end = t.iter().position(|&b| b == 0).unwrap_or(t.len());
             // 規格上是 ASCII；其他位元組顯示為 U+FFFD
             s.datetime = Some(file_text(&t[..end]));

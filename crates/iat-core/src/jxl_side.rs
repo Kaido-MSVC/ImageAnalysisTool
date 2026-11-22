@@ -29,6 +29,7 @@ use crate::png_scan::exif_orientation;
 use crate::report::{Count, EffectiveColor, FileReport, Issue, MetaItem, Orientation, code};
 use crate::temp::{TempError, TempErrorKind};
 use crate::text::{sha256_hex, short_hash};
+use crate::u64_to_usize;
 
 pub const DECODER_NAME: &str = "jxl";
 pub const DECODER_VERSION: &str = "0.8.0";
@@ -333,7 +334,7 @@ impl<'a> JxlImageDecoder<'a> {
         loop {
             let ev = if format_set {
                 let rows = &mut buf[start..start + n];
-                let mut ob = [JxlOutputBuffer::new(rows, self.height as usize, self.row_bytes() as usize)];
+                let mut ob = [JxlOutputBuffer::new(rows, self.height as usize, u64_to_usize(self.row_bytes()))];
                 step(&mut d, &mut fi, Some(&mut ob))
             } else {
                 step(&mut d, &mut fi, None)
@@ -436,7 +437,7 @@ impl<'a> Decoder<'a> for JxlImageDecoder<'a> {
         s.rep.decode_path += "+temp";
         let Some((buf, start)) = self.decode_all(s, issues) else { return false };
         let temp = s.temp.as_mut().expect("reserve() succeeded on this temp file");
-        let rb = self.row_bytes() as usize;
+        let rb = u64_to_usize(self.row_bytes());
         let rows = &buf[start..start + rb * self.height as usize];
         let mut written = Ok(());
         for row in rows.chunks_exact(rb) {

@@ -136,7 +136,7 @@ impl Reader<'_, '_> {
         let mut h = Sha256::new();
         let mut buf = vec![0u8; 65536];
         while n > 0 {
-            let take = n.min(buf.len() as u64) as usize;
+            let take = usize::try_from(n).map_or(buf.len(), |n| n.min(buf.len()));
             if !self.bytes(off, &mut buf[..take]) {
                 return None;
             }

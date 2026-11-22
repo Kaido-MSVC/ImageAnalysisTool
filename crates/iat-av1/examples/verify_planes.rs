@@ -21,12 +21,12 @@ fn boxes(b: &[u8], start: usize, end: usize) -> Vec<([u8; 4], usize, usize)> {
     let mut out = Vec::new();
     let mut p = start;
     while p + 8 <= end {
-        let Some(mut size) = be(b, p, 4).map(|v| v as usize) else { break };
+        let Some(mut size) = be(b, p, 4).and_then(|v| usize::try_from(v).ok()) else { break };
         let t: [u8; 4] = b[p + 4..p + 8].try_into().expect("4 bytes");
         let mut hdr = 8;
         if size == 1 {
-            let Some(s) = be(b, p + 8, 8) else { break };
-            size = s as usize;
+            let Some(s) = be(b, p + 8, 8).and_then(|v| usize::try_from(v).ok()) else { break };
+            size = s;
             hdr = 16;
         } else if size == 0 {
             size = end - p;
@@ -102,7 +102,7 @@ fn parse(b: &[u8]) -> Option<Items> {
                 let w = if b[s] == 0 { 2 } else { 4 };
                 for (rt, rs, _) in boxes(b, s + 4, e) {
                     let from = be(b, rs, w)? as u32;
-                    let n = be(b, rs + w, 2)? as usize;
+                    let n = usize::try_from(be(b, rs + w, 2)?).ok()?;
                     if &rt == b"auxl" {
                         for i in 0..n {
                             it.auxl_to.push((from, be(b, rs + w + 2 + i * w, w)? as u32));
@@ -120,7 +120,7 @@ fn payload(b: &[u8], it: &Items, id: u32) -> Option<Vec<u8>> {
     let (_, ext) = it.locs.iter().find(|(i, _)| *i == id)?;
     let mut v = Vec::new();
     for &(o, l) in ext {
-        v.extend_from_slice(b.get(o as usize..(o + l) as usize)?);
+        v.extend_from_slice(b.get(usize::try_from(o).ok()?..usize::try_from(o + l).ok()?)?);
     }
     Some(v)
 }

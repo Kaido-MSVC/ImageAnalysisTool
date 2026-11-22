@@ -14,6 +14,7 @@ use crate::png_scan::exif_orientation;
 use crate::psd_scan::{PackBitsRow, PsdScan, be16, be32, scan_psd};
 use crate::report::{Count, EffectiveColor, FileReport, Issue, MetaItem, Orientation, PsdInfo, code};
 use crate::text::{sha256_hex, short_hash};
+use crate::u64_to_usize;
 
 fn mode_name(m: u16) -> &'static str {
     match m {
@@ -63,7 +64,7 @@ impl Stream {
                 if self.pos >= self.end {
                     return false;
                 }
-                let want = (self.end - self.pos).min(self.cap as u64) as usize;
+                let want = usize::try_from(self.end - self.pos).map_or(self.cap, |n| n.min(self.cap));
                 self.buf.resize(want, 0);
                 if !matches!(input.read_at(self.pos, &mut self.buf), Ok(n) if n == want) {
                     return false;
@@ -185,7 +186,7 @@ impl<'a> Decoder<'a> for PsdDecoder<'a> {
 
     fn open(&mut self, s: &mut SideState<'a>, issues: &mut Vec<Issue>, _lim: &Limits) -> bool {
         let used = self.used as usize;
-        let row_bytes = self.sc.row_bytes as usize;
+        let row_bytes = u64_to_usize(self.sc.row_bytes);
         let h = self.sc.height as usize;
         let mut ok = true;
         let mut alloc = |v: &mut Vec<u8>, n: usize| {
@@ -198,7 +199,7 @@ impl<'a> Decoder<'a> for PsdDecoder<'a> {
         }
         if self.sc.compression == 1 {
             let mut p = Vec::new();
-            alloc(&mut p, self.max_packed() as usize);
+            alloc(&mut p, u64_to_usize(self.max_packed()));
             self.packed = p;
             ok &= self.counts.try_reserve_exact(h * used).is_ok();
             if ok {
@@ -215,7 +216,7 @@ impl<'a> Decoder<'a> for PsdDecoder<'a> {
                 "PSD row buffers could not be allocated".into(),
             );
         }
-        let cap = self.stream_cap() as usize;
+        let cap = u64_to_usize(self.stream_cap());
         let data_end = self.sc.data_offset + self.sc.data_bytes;
         if self.sc.compression == 0 {
             let plane = u64::from(self.sc.height) * self.sc.row_bytes;
@@ -264,7 +265,7 @@ impl<'a> Decoder<'a> for PsdDecoder<'a> {
         if s.failed {
             return false;
         }
-        let y = s.rows as usize;
+        let y = u64_to_usize(s.rows);
         let h = self.sc.height as usize;
         let partial = if s.rows > 0 { "partial" } else { "failed" };
         for c in 0..self.used as usize {
@@ -281,7 +282,7 @@ impl<'a> Decoder<'a> for PsdDecoder<'a> {
             let mut row = PackBitsRow::new(&mut self.raw[c]);
             let mut why: Result<(), String> = Ok(());
             while left > 0 && why.is_ok() {
-                let k = left.min(self.packed.len() as u64) as usize;
+                let k = usize::try_from(left).map_or(self.packed.len(), |n| n.min(self.packed.len()));
                 if !self.streams[c].take(self.input, &mut self.packed[..k]) {
                     return self.fail(s, issues, partial, "io_error", code::DECODE_FAILED, unreadable());
                 }

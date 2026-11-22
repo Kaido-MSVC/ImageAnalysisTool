@@ -22,6 +22,7 @@ use crate::png_scan::{Phase, PngScan, PngText, exif_orientation, scan_png};
 use crate::report::{Count, EffectiveColor, FileReport, Issue, MetaItem, Orientation, code};
 use crate::temp::WRITE_BUFFER;
 use crate::text::{hex, sha256_hex, short_hash};
+use crate::u64_to_usize;
 
 pub const DECODER_NAME: &str = "png";
 pub const DECODER_VERSION: &str = "0.18.1";
@@ -242,7 +243,7 @@ impl Read for FeedReader<'_> {
         let i = self.starts.partition_point(|&s| s <= self.pos) - 1;
         let (off, len) = self.segs[i];
         let within = self.pos - self.starts[i];
-        let n = ((len - within) as usize).min(buf.len());
+        let n = usize::try_from(len - within).map_or(buf.len(), |r| r.min(buf.len()));
         match self.input.read_at(off + within, &mut buf[..n]) {
             Ok(k) if k == n => {
                 self.pos += n as u64;
@@ -637,7 +638,7 @@ impl<'a> Decoder<'a> for PngDecoder<'a> {
             || info.interlaced != (sc.interlace == 1)
             || oct != info.color_type
             || obd != info.bit_depth
-            || line != Some(rb as usize)
+            || line != Some(u64_to_usize(rb))
         {
             s.failed = true;
             s.rep.decode_status = "failed".into();
@@ -682,7 +683,7 @@ impl<'a> Decoder<'a> for PngDecoder<'a> {
             self.idat_warnings.push("IDAT: Too much image data".into());
         }
 
-        self.raw.reserve(rb as usize);
+        self.raw.reserve(u64_to_usize(rb));
         if self.interlaced() {
             // 解碼開始前先在暫存預留整張正規影像。
             self.bps = if s.layout.bits > 8 { 2 } else { 1 };

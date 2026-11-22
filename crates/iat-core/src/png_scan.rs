@@ -238,12 +238,15 @@ pub fn exif_orientation(e: &[u8]) -> i32 {
     if ifd + 2 > n as u64 {
         return -1;
     }
-    let Some(count) = u16_at(ifd as usize) else { return -1 };
-    if ifd + 2 + u64::from(count) * 12 > n as u64 {
+    // 上面已確認 ifd + 2 ≤ n，try_from 必定成功
+    let Ok(ifd) = usize::try_from(ifd) else { return -1 };
+    let Some(count) = u16_at(ifd) else { return -1 };
+    let count = count as usize; // u16_at 只讀 2 bytes
+    if ifd + 2 + count * 12 > n {
         return -1;
     }
-    for i in 0..u64::from(count) {
-        let o = (ifd + 2 + i * 12) as usize;
+    for i in 0..count {
+        let o = ifd + 2 + i * 12;
         if u16_at(o) == Some(0x0112) {
             if u16_at(o + 2) != Some(3) || u32_at(o + 4) != Some(1) {
                 return -1;
@@ -891,7 +894,7 @@ pub fn scan_png(f: &Input<'_>, limits: &Limits) -> PngScan {
         let (mut off, mut left) = (pos + 8, u64::from(len));
         let mut io_fail = false;
         while left > 0 {
-            let want = left.min(io.len() as u64) as usize;
+            let want = usize::try_from(left).map_or(io.len(), |n| n.min(io.len()));
             match f.read_at(off, &mut io[..want]) {
                 Ok(n) if n == want => {}
                 _ => {

@@ -13,6 +13,7 @@ use crate::input::Input;
 use crate::limits::Limits;
 use crate::report::{Issue, code};
 use crate::text::hex;
+use crate::u64_to_usize;
 
 #[derive(Clone, Debug)]
 pub struct PsdScan {
@@ -189,7 +190,7 @@ impl Reader<'_, '_> {
         let mut h = Sha256::new();
         let mut buf = vec![0u8; 65536];
         while n > 0 {
-            let take = n.min(buf.len() as u64) as usize;
+            let take = usize::try_from(n).map_or(buf.len(), |n| n.min(buf.len()));
             if !self.bytes(off, &mut buf[..take]) {
                 return None;
             }
@@ -668,12 +669,12 @@ fn scan_into(s: &mut PsdScan, rd: &mut Reader<'_, '_>, file_size: u64, lim: &Lim
             let mut buf = vec![0u8; 1 << 20];
             let (mut sum, mut off, mut left) = (0u64, pos, table);
             while left > 0 {
-                let take = left.min(buf.len() as u64) as usize;
+                let take = usize::try_from(left).map_or(buf.len(), |n| n.min(buf.len()));
                 if !rd.bytes(off, &mut buf[..take]) {
                     s.corrupt(code::TRUNCATED, "RLE row byte-count table could not be read");
                     return;
                 }
-                for e in buf[..take].chunks_exact(entry as usize) {
+                for e in buf[..take].chunks_exact(u64_to_usize(entry)) {
                     sum += if wide { u64::from(be32(e)) } else { u64::from(be16(e)) };
                 }
                 off += take as u64;

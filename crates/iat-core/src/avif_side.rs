@@ -22,6 +22,7 @@ use crate::png_scan::exif_orientation;
 use crate::report::{AvifInfo, Count, EffectiveColor, FileReport, Issue, MetaItem, Orientation, code};
 use crate::temp::{TempError, TempErrorKind};
 use crate::text::{sha256_hex, short_hash};
+use crate::u64_to_usize;
 use crate::worker::Av1Guard;
 
 pub const DECODER_NAME: &str = "rav1d";
@@ -259,7 +260,7 @@ impl AvifDecoder<'_> {
         let ch_n = g.channels() as usize;
         let (mut y_row, mut u_row, mut v_row, mut a_row) = (vec![0u16; w], vec![0u16; w], vec![0u16; w], vec![0u16; w]);
         let mut scratch = Vec::new();
-        let mut out = Vec::with_capacity(self.geo.row_bytes() as usize);
+        let mut out = Vec::with_capacity(u64_to_usize(self.geo.row_bytes()));
         let alpha_full = alpha.as_ref().map(|a| a.tiles.iter().map(Picture::full_range).collect::<Vec<_>>());
         let temp = s.temp.as_mut().expect("open() reserved this temp file");
         for y in 0..g.height {
@@ -358,7 +359,7 @@ impl<'a> Decoder<'a> for AvifDecoder<'a> {
             temp_failure(s, issues, &e);
             return false;
         }
-        self.row = vec![0; self.geo.row_bytes() as usize];
+        self.row = vec![0; u64_to_usize(self.geo.row_bytes())];
         self.decoded = true;
         true
     }

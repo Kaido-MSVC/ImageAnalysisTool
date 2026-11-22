@@ -24,7 +24,7 @@ use std::time::{Duration, Instant};
 use crate::engine::{AllocStage, AnalysisInput, Outcome, RowLayout, ViewSink, ViewStop, analyze, decode_view_samples};
 use crate::input::Input;
 use crate::limits::Limits;
-use crate::{CancelToken, Mode, Progress, Stage, win};
+use crate::{CancelToken, Mode, Progress, Stage, u64_to_usize, win};
 
 /// stdout 的上限（分析模式，同 C++ 版 kMaxWorkerStdout）。
 const MAX_STDOUT: usize = 32 << 20;
@@ -278,9 +278,9 @@ fn read_channel(f: &mut File, progress: &dyn Progress) -> SideFailures {
         let b = u64::from_le_bytes(rec[9..17].try_into().expect("8 bytes"));
         match rec[0] {
             REC_PROGRESS => progress.report(Stage::Analyze, a, b),
-            REC_AV1_PANIC if a < 2 => failed.av1_panic = Some(a as usize),
+            REC_AV1_PANIC if a < 2 => failed.av1_panic = Some(u64_to_usize(a)),
             win::REC_ALLOC_FAILED if a < 2 => {
-                failed.alloc_failed = AllocStage::from_code(b).map(|stage| (a as usize, stage));
+                failed.alloc_failed = AllocStage::from_code(b).map(|stage| (u64_to_usize(a), stage));
             }
             _ => {}
         }

@@ -100,7 +100,7 @@ impl Reader<'_, '_> {
         let mut h = Sha256::new();
         let mut buf = vec![0u8; 65536];
         while n > 0 {
-            let take = n.min(buf.len() as u64) as usize;
+            let take = usize::try_from(n).map_or(buf.len(), |n| n.min(buf.len()));
             if !self.bytes(off, &mut buf[..take]) {
                 return None;
             }
@@ -290,18 +290,25 @@ fn walk(s: &mut JxlScan, rd: &mut Reader<'_, '_>, lim: &Limits) {
                 s.exif_status = "over_limit";
                 s.metadata_status = "over_limit";
             } else {
-                let mut e = vec![0u8; len as usize];
-                if !rd.bytes(data, &mut e) {
+                let e = usize::try_from(len).ok().and_then(|n| {
+                    let mut e = vec![0u8; n];
+                    rd.bytes(data, &mut e).then_some(e)
+                });
+                let Some(e) = e else {
                     corrupt(s, code::TRUNCATED, "Exif payload unreadable".into());
                     return;
-                }
+                };
                 // TIFF 檔頭位於 4 bytes 位移欄位之後
                 let off = be(&e[..4]);
                 if off > len - 4 {
                     s.exif_status = "present";
                     warn(s, "Exif TIFF header offset lies outside the box");
                 } else {
-                    s.exif = e.get(4 + off as usize..).map(<[u8]>::to_vec).unwrap_or_default();
+                    s.exif = usize::try_from(off)
+                        .ok()
+                        .and_then(|off| e.get(4 + off..))
+                        .map(<[u8]>::to_vec)
+                        .unwrap_or_default();
                     s.exif_status = "present";
                 }
                 meta_total += len;

@@ -18,6 +18,7 @@ use crate::tiff_codec::{
     Mem, Messages, lzw_decode, packbits_decode, reverse_bits, swab16_to_native, undo_horizontal, zip_decode,
 };
 use crate::tiff_scan::{Entry, TiffScan, compression_name, scan_tiff, type_size, uint};
+use crate::u64_to_usize;
 
 pub const DECODER_NAME: &str = "weezl";
 pub const DECODER_VERSION: &str = "0.1.12";
@@ -645,7 +646,7 @@ impl<'a> TiffDecoder<'a> {
         // 預測只在 LZW 與 Deflate 時有作用（libtiff 的 None 與 PackBits 不設定預測器）
         if self.sc.predictor == 2 && matches!(self.sc.compression, 5 | 8 | 32946) {
             let row_size = if tiled { u64::from(self.tw) * self.px } else { self.row_bytes };
-            undo_horizontal(out, row_size as usize, self.ch as usize, self.sc.bits);
+            undo_horizontal(out, u64_to_usize(row_size), self.ch as usize, self.sc.bits);
         }
         Ok(())
     }
@@ -688,10 +689,10 @@ impl<'a> TiffDecoder<'a> {
                 let vw = self.tw.min(self.sc.width - tx * self.tw);
                 let vh = self.tl.min(self.sc.height - ty * self.tl);
                 let line = u64::from(self.tw) * self.px;
-                let valid = (u64::from(vw) * self.px) as usize;
+                let valid = u64_to_usize(u64::from(vw) * self.px);
                 let temp = s.temp.as_mut().expect("open() reserved the temp file");
                 for yy in 0..u64::from(vh) {
-                    let at = (yy * line) as usize;
+                    let at = u64_to_usize(yy * line);
                     if let Err(e) = temp.append(&buf[at..at + valid]) {
                         self.buf = buf;
                         temp_failure(s, issues, &e);
@@ -728,8 +729,8 @@ impl<'a> TiffDecoder<'a> {
             let x0 = tx * self.tw;
             let vw = self.tw.min(self.sc.width - x0);
             let off = band + u64::from(vh) * u64::from(x0) * self.px + u64::from(yy) * u64::from(vw) * self.px;
-            let at = (u64::from(x0) * self.px) as usize;
-            let len = (u64::from(vw) * self.px) as usize;
+            let at = u64_to_usize(u64::from(x0) * self.px);
+            let len = u64_to_usize(u64::from(vw) * self.px);
             if let Err(e) = temp.read_at(off, &mut self.row[at..at + len]) {
                 temp_failure(s, issues, &e);
                 return false;
@@ -820,7 +821,7 @@ impl<'a> Decoder<'a> for TiffDecoder<'a> {
                 let strip = y / self.rps;
                 if self.loaded != Some(strip) {
                     let rows = self.rps.min(self.sc.height - strip * self.rps);
-                    let want = (self.row_bytes * u64::from(rows)) as usize;
+                    let want = u64_to_usize(self.row_bytes * u64::from(rows));
                     let mut buf = std::mem::take(&mut self.buf);
                     let r = self.read_block(strip, &mut buf[..want]);
                     self.buf = buf;
@@ -830,15 +831,15 @@ impl<'a> Decoder<'a> for TiffDecoder<'a> {
                     self.loaded = Some(strip);
                     self.blocks_read += 1;
                 }
-                let at = (u64::from(y - strip * self.rps) * self.row_bytes) as usize;
-                let len = self.row_bytes as usize;
+                let at = u64_to_usize(u64::from(y - strip * self.rps) * self.row_bytes);
+                let len = u64_to_usize(self.row_bytes);
                 let mut canon = std::mem::take(&mut s.canon);
                 self.convert(&mut canon, &self.buf[at..at + len], 0, self.sc.width);
                 s.canon = canon;
             }
             Mode::TileBand => {
                 let ty = y / self.tl;
-                let bb = self.block_bytes as usize;
+                let bb = u64_to_usize(self.block_bytes);
                 if self.loaded != Some(ty) {
                     let mut buf = std::mem::take(&mut self.buf);
                     for tx in 0..self.across {
@@ -859,8 +860,8 @@ impl<'a> Decoder<'a> for TiffDecoder<'a> {
                 for tx in 0..self.across {
                     let x0 = tx * self.tw;
                     let vw = self.tw.min(self.sc.width - x0); // 右邊的填補欄不算
-                    let at = tx as usize * bb + (yy * line) as usize;
-                    let len = (u64::from(vw) * self.px) as usize;
+                    let at = tx as usize * bb + u64_to_usize(yy * line);
+                    let len = u64_to_usize(u64::from(vw) * self.px);
                     self.convert(&mut canon, &self.buf[at..at + len], x0, vw);
                 }
                 s.canon = canon;

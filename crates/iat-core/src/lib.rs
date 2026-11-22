@@ -8,6 +8,10 @@
 //! 分析在 iat-worker.exe 裡執行（[`worker`]，D-R02 第三次修訂）。
 #![deny(unsafe_code)]
 
+// 長度與位移以 u64 計算後轉成 usize，前提是 usize 至少 64 位元（見 `u64_to_usize`）。
+#[cfg(not(target_pointer_width = "64"))]
+compile_error!("iat-core 只支援 64 位元目標（u64 轉 usize 不可截斷）");
+
 pub mod avif_parse;
 pub mod avif_scan;
 pub mod avif_side;
@@ -53,6 +57,15 @@ pub use run::{
 };
 pub use view::{DecodedImage, ViewError, decode_for_view};
 pub use worker::{worker_available, worker_main};
+
+/// 記憶體內算出的 u64（列寬、緩衝大小等）轉成 usize。
+///
+/// 圖檔標頭直接讀到的長度與位移不要用這個函式，改用 `usize::try_from` 並做範圍檢查。
+#[expect(clippy::cast_possible_truncation, reason = "crate 根的 compile_error! 保證 usize 為 64 位元")]
+#[inline]
+pub(crate) const fn u64_to_usize(v: u64) -> usize {
+    v as usize
+}
 
 /// 工具版本（workspace 的 version，單一來源）。
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

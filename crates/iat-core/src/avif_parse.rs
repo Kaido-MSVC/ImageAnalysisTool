@@ -944,10 +944,11 @@ pub fn read_item(input: &Input<'_>, it: &ItemData, partial: usize) -> R<Vec<u8>>
     for &(off, len) in &it.extents {
         let n = len.min(remaining);
         if let Some((idat_off, idat_len)) = idat {
-            if off > idat_len as u64 {
+            // off ≤ idat_len 時 try_from 必定成功；超過時與原本相同，回報位移錯誤
+            let Some(rest) = usize::try_from(off).ok().and_then(|o| idat_len.checked_sub(o)) else {
                 return Err(ParseError::bmff(format!("Item ID {} has impossible extent offset in idat buffer", it.id)));
-            }
-            if len > idat_len - off as usize {
+            };
+            if len > rest {
                 return Err(ParseError::bmff(format!("Item ID {} has impossible extent size in idat buffer", it.id)));
             }
             out.extend(io_read(input, idat_off + off, n)?);
