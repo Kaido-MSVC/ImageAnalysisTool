@@ -12,6 +12,7 @@ use crate::paths::{full_path, is_directory, trim_dir};
 use crate::run::open_read_only;
 use crate::sniff::sniff_format;
 use crate::temp::RunTemp;
+use crate::worker::view_protocol::{ViewHeader, ViewTrailer};
 use crate::worker::{WorkerFiles, WorkerMode, WorkerSettings, describe_failure, read_view_stdout, run_worker};
 use crate::{CancelToken, Limits, NoProgress, win};
 
@@ -171,7 +172,7 @@ fn view_in_worker(
         cancel,
         None,
         &NoProgress,
-        read_view_stdout,
+        |f| read_view_stdout(f, max_pixels),
     );
     if cancel.is_cancelled() {
         return Err(ViewError::Cancelled);
@@ -191,14 +192,39 @@ fn view_in_worker(
         _ => {}
     }
     let t = o.trailer.unwrap_or_default();
+    check_rows(&h, &t, o.samples.len())?;
     let layout = crate::engine::RowLayout::new(crate::engine::model_name(&h.model), h.channels, h.bits);
     let v = ViewSamples { layout, width: h.width, height: h.height, rows: t.rows, format: h.format, error: t.error };
     Ok((v, o.samples))
 }
 
+/// worker 回報的列數必須不超過高度，而且和實際收到的樣本數相符（標頭已由
+/// `read_view_stdout` 驗證過）。
+fn check_rows(h: &ViewHeader, t: &ViewTrailer, samples: usize) -> Result<(), ViewError> {
+    let row_len = h.width as usize * h.channels as usize;
+    if t.rows > h.height || Some(samples) != row_len.checked_mul(t.rows as usize) {
+        return Err(ViewError::Decode(format!(
+            "worker view output is inconsistent: {} rows reported, {samples} samples received",
+            t.rows
+        )));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rows_must_match_the_samples_received() {
+        let h = ViewHeader { model: "rgb".into(), channels: 3, bits: 8, width: 4, height: 2, ..ViewHeader::default() };
+        let rows = |n| ViewTrailer { rows: n, error: None };
+        assert_eq!(check_rows(&h, &rows(2), 24), Ok(()));
+        assert_eq!(check_rows(&h, &rows(1), 12), Ok(()));
+        assert!(matches!(check_rows(&h, &rows(2), 12), Err(ViewError::Decode(_))), "fewer samples than rows");
+        assert!(matches!(check_rows(&h, &rows(3), 36), Err(ViewError::Decode(_))), "more rows than the height");
+        assert!(matches!(check_rows(&h, &rows(u32::MAX), 0), Err(ViewError::Decode(_))));
+    }
 
     fn fixture(name: &str) -> std::path::PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/generated").join(name)

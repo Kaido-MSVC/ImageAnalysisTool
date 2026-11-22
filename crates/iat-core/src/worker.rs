@@ -676,7 +676,43 @@ fn read_line(r: &mut impl Read) -> io::Result<Vec<u8>> {
     }
 }
 
-pub(crate) fn read_view_stdout(f: &mut File) -> ViewOutput {
+/// 樣本模型的聲道數（gray 1、gray_alpha 2、rgb 3、rgba 4）；不認得的模型為 None。
+fn model_channels(model: &str) -> Option<u32> {
+    match model {
+        "gray" => Some(1),
+        "gray_alpha" => Some(2),
+        "rgb" => Some(3),
+        "rgba" => Some(4),
+        _ => None,
+    }
+}
+
+/// worker 送來的檢視標頭（不可信）不能用時的原因：聲道數與模型不符、位元數不在 1..=16、
+/// 寬高為 0，或像素數超過 `max_pixels`。通過後 `width × channels` 與總樣本數都不會溢位。
+fn view_header_problem(h: &ViewHeader, max_pixels: u64) -> Option<&'static str> {
+    if model_channels(&h.model) != Some(h.channels) {
+        return Some("channel count does not match the sample model");
+    }
+    if !(1..=16).contains(&h.bits) {
+        return Some("bit depth is outside 1..=16");
+    }
+    if h.width == 0 || h.height == 0 {
+        return Some("width or height is zero");
+    }
+    if u64::from(h.width) * u64::from(h.height) > max_pixels {
+        return Some("pixel count exceeds the viewing limit");
+    }
+    None
+}
+
+/// 剩下的輸出讀掉丟棄：worker 才不會因管線寫滿而卡住。
+fn drain(r: &mut impl Read) {
+    let _ignored = io::copy(r, &mut io::sink());
+}
+
+/// 父程序：解析檢視模式的 stdout。輸出來自 worker，一律視為不可信：標頭先驗證，
+/// 樣本緩衝的大小只由驗證過的標頭決定（見 [`view_header_problem`]）。
+pub(crate) fn read_view_stdout(f: &mut impl Read, max_pixels: u64) -> ViewOutput {
     let mut r = io::BufReader::with_capacity(1 << 20, f);
     let mut o = ViewOutput { header: ViewHeader::default(), samples: Vec::new(), trailer: None, error: None };
     let header: Result<ViewHeader, String> = read_line(&mut r)
@@ -686,10 +722,17 @@ pub(crate) fn read_view_stdout(f: &mut File) -> ViewOutput {
         Ok(h) => o.header = h,
         Err(e) => {
             o.error = Some(format!("view header: {e}"));
+            drain(&mut r);
             return o;
         }
     }
     if !o.header.stop.is_empty() {
+        drain(&mut r);
+        return o;
+    }
+    if let Some(why) = view_header_problem(&o.header, max_pixels) {
+        o.error = Some(format!("view header is invalid: {why}"));
+        drain(&mut r);
         return o;
     }
     let row_len = o.header.width as usize * o.header.channels as usize;
@@ -697,8 +740,7 @@ pub(crate) fn read_view_stdout(f: &mut File) -> ViewOutput {
     if o.samples.try_reserve_exact(total).is_err() {
         o.header.stop = "too_large".into();
         o.header.bytes = (total as u64).saturating_mul(2);
-        // 剩下的輸出照樣讀掉，worker 才不會卡在寫入
-        let _ignored = io::copy(&mut r, &mut io::sink());
+        drain(&mut r);
         return o;
     }
     let mut row = vec![0u8; row_len * 2];
@@ -745,4 +787,72 @@ pub(crate) fn describe_failure<T>(w: &WorkerRun<T>) -> Option<String> {
 /// 呼叫端用：iat-worker.exe 是否在執行檔旁邊。
 pub fn worker_available() -> bool {
     worker_exe().is_some_and(|p| win::path_exists(&p))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const LIMIT: u64 = 1 << 28;
+
+    /// 標頭一行，後面接 `rest`。
+    fn stream(header: &str, rest: &[u8]) -> Vec<u8> {
+        let mut v = header.as_bytes().to_vec();
+        v.push(b'\n');
+        v.extend_from_slice(rest);
+        v
+    }
+
+    fn parse(bytes: &[u8]) -> ViewOutput {
+        read_view_stdout(&mut io::Cursor::new(bytes), LIMIT)
+    }
+
+    fn assert_invalid(header: &str, why: &str) {
+        // 標頭之後還有大量資料：必須全部讀掉，而且不配置樣本緩衝
+        let bytes = stream(header, &[1u8; 4096]);
+        let mut cur = io::Cursor::new(&bytes[..]);
+        let o = read_view_stdout(&mut cur, LIMIT);
+        assert_eq!(cur.position(), bytes.len() as u64, "{why}: the rest of the output is drained");
+        let e = o.error.unwrap_or_else(|| panic!("{why}: accepted {header}"));
+        assert!(e.starts_with("view header is invalid"), "{why}: {e}");
+        assert_eq!(o.samples.capacity(), 0, "{why}: no sample buffer");
+    }
+
+    #[test]
+    fn valid_stream_round_trips() {
+        let mut rest = vec![1u8];
+        rest.extend([1, 0, 2, 0]); // 一列 2 個 gray 樣本：1、2
+        rest.push(0);
+        rest.extend(br#"{"rows":1}"#);
+        rest.push(b'\n');
+        let o = parse(&stream(r#"{"format":"png","model":"gray","channels":1,"bits":8,"width":2,"height":1}"#, &rest));
+        assert_eq!(o.error, None);
+        assert_eq!(o.samples, [1, 2]);
+        assert_eq!(o.trailer.map(|t| t.rows), Some(1));
+    }
+
+    #[test]
+    fn malformed_headers_are_rejected_without_allocating() {
+        assert_invalid(r#"{"model":"gray","channels":1,"bits":0,"width":2,"height":2}"#, "bits 0");
+        assert_invalid(r#"{"model":"gray","channels":1,"bits":32,"width":2,"height":2}"#, "bits 32");
+        assert_invalid(r#"{"model":"gray","channels":1,"bits":17,"width":2,"height":2}"#, "bits 17");
+        assert_invalid(r#"{"model":"rgba","channels":1,"bits":8,"width":2,"height":2}"#, "channels vs model");
+        assert_invalid(r#"{"model":"rgb","channels":4,"bits":8,"width":2,"height":2}"#, "channels vs model");
+        assert_invalid(r#"{"model":"cmyk","channels":4,"bits":8,"width":2,"height":2}"#, "unknown model");
+        assert_invalid(r#"{"model":"rgba","channels":4,"bits":8,"width":4294967295,"height":0}"#, "height 0");
+        assert_invalid(r#"{"model":"rgba","channels":4,"bits":8,"width":0,"height":5}"#, "width 0");
+        assert_invalid(
+            r#"{"model":"rgba","channels":4,"bits":16,"width":4294967295,"height":4294967295}"#,
+            "over the pixel limit",
+        );
+    }
+
+    #[test]
+    fn rows_beyond_the_height_are_malformed() {
+        // 標頭說 1 列，送來 2 列
+        let rest = [1u8, 7, 0, 1, 8, 0];
+        let o = parse(&stream(r#"{"model":"gray","channels":1,"bits":8,"width":1,"height":1}"#, &rest));
+        assert_eq!(o.error.as_deref(), Some("view output is malformed"));
+        assert_eq!(o.samples, [7]);
+    }
 }
