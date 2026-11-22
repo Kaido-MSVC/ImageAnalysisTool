@@ -78,6 +78,16 @@ GUI 帶入約 290 個間接依賴（全部是純 Rust，沒有 C/C++ 預建檔�
 
 **libavif 1.4.2 + aom 3.15.2 只用於驗證，不是依賴**：`tools/libavif_gen/` 的 C++ 程式連結 C++ 版建置裡的靜態庫（唯讀），傾印 libavif 解出的平面給 rav1d 對照、產生 `tests/fixtures/avif_generated/` 的 grid 測試圖，另有一支只供量測用的編碼程式（D-R19）。
 
+## Windows 資源（階段 7，2026-11-22，只在 build.rs 使用）
+
+| crate | 宣告 | Cargo.lock | 授權 | 用途 |
+|---|---|---|---|---|
+| winresource | 0.1.34（`default-features = false`） | 0.1.34 | MIT | iat-cli、iat-worker、iat-gui 的 build-dependency：嵌入 `assets/icons/iat-rust.ico` 與版本資訊（FileVersion 2.0.0、FileDescription 等），用 Windows SDK 的 rc.exe（本機 10.0.28000.0）編譯 |
+
+選擇理由：候選是 winresource 0.1.34 與 embed-resource 3.0.12（都是 MIT、都在維護）。winresource 關掉預設的 `toml` feature 後只帶入 version_check 0.9.x（MIT OR Apache-2.0，原本就在 Cargo.lock 裡），並且直接從 Cargo 的版本產生 VERSIONINFO；embed-resource 要自己寫 .rc 檔，還會帶入 cc、rustc_version、toml、vswhom、winreg。兩者都只在建置時執行，不進執行檔。`cargo deny check` 通過，沒有新的多版本警告。
+
+GUI 視窗圖示用 Slint 的 `Window.icon`（`@image-url`），圖檔是從 .ico 原樣取出的 256×256 PNG（`assets/icons/iat-rust-256.png`，`assets/icons/extract_ico_png.py` 產生），不是新依賴。
+
 ## 尚未加入（規劃書已選定）
 
 avif-parse 等對照用 crate 只放 dev-dependencies（目前沒有加入）。規劃書選定的 tiff crate 經階段 4 驗證後不採用（D-R17）。

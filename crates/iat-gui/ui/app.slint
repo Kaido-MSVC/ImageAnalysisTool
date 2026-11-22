@@ -557,6 +557,8 @@ component AboutPage inherits VerticalLayout {
 
 export component AppWindow inherits Window {
     title: "iat";
+    // 256×256 取自 iat-rust.ico（assets/icons/extract_ico_png.py），標題列與工作列用
+    icon: @image-url("../../../assets/icons/iat-rust-256.png");
     preferred-width: 1100px;
     preferred-height: 760px;
     min-width: 820px;
