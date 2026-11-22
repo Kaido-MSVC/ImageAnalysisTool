@@ -218,7 +218,7 @@ impl<'a> Decoder<'a> for PsdDecoder<'a> {
         let cap = self.stream_cap() as usize;
         let data_end = self.sc.data_offset + self.sc.data_bytes;
         if self.sc.compression == 0 {
-            let plane = self.sc.height as u64 * self.sc.row_bytes;
+            let plane = u64::from(self.sc.height) * self.sc.row_bytes;
             self.streams = (0..used as u64)
                 .map(|c| Stream::new(self.sc.data_offset + c * plane, self.sc.data_offset + (c + 1) * plane, cap))
                 .collect();

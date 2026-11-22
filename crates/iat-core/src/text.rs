@@ -27,7 +27,7 @@ fn is_control(cp: u32) -> bool {
 
 /// ISO 8859-1 位元組（PNG 文字 chunk 的關鍵字）轉成顯示用的 UTF-8；控制字元換成 U+FFFD。
 pub fn latin1_text(raw: &[u8]) -> String {
-    raw.iter().map(|&b| if is_control(b as u32) { '\u{FFFD}' } else { b as char }).collect()
+    raw.iter().map(|&b| if is_control(u32::from(b)) { '\u{FFFD}' } else { b as char }).collect()
 }
 
 /// 檔案裡編碼不明的字串（TIFF ASCII 欄位、解碼器訊息）轉成顯示用的 UTF-8（C++ 版 `file_text`）：

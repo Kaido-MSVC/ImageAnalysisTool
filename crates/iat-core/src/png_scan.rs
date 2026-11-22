@@ -224,7 +224,7 @@ pub fn exif_orientation(e: &[u8]) -> i32 {
     };
     let u16_at = |o: usize| -> Option<u32> {
         let b = e.get(o..o + 2)?;
-        Some(if le { u16::from_le_bytes([b[0], b[1]]) } else { u16::from_be_bytes([b[0], b[1]]) } as u32)
+        Some(u32::from(if le { u16::from_le_bytes([b[0], b[1]]) } else { u16::from_be_bytes([b[0], b[1]]) }))
     };
     let u32_at = |o: usize| -> Option<u32> {
         let b = e.get(o..o + 4)?;
@@ -234,15 +234,15 @@ pub fn exif_orientation(e: &[u8]) -> i32 {
     if u16_at(2) != Some(42) {
         return -1;
     }
-    let ifd = u32_at(4).unwrap_or(0) as u64;
+    let ifd = u64::from(u32_at(4).unwrap_or(0));
     if ifd + 2 > n as u64 {
         return -1;
     }
     let Some(count) = u16_at(ifd as usize) else { return -1 };
-    if ifd + 2 + count as u64 * 12 > n as u64 {
+    if ifd + 2 + u64::from(count) * 12 > n as u64 {
         return -1;
     }
-    for i in 0..count as u64 {
+    for i in 0..u64::from(count) {
         let o = (ifd + 2 + i * 12) as usize;
         if u16_at(o) == Some(0x0112) {
             if u16_at(o + 2) != Some(3) || u32_at(o + 4) != Some(1) {
@@ -371,7 +371,7 @@ fn libpng_chunk(lib: &mut Libpng, st: &mut LibState, phase: Phase, t: &[u8; 4], 
         Some("too short")
     } else {
         match max_len {
-            MaxLen::Limit if len as u64 > st.chunk_max => Some("length exceeds libpng limit"),
+            MaxLen::Limit if u64::from(len) > st.chunk_max => Some("length exceeds libpng limit"),
             MaxLen::Bytes(m) if len > m => Some("too long"),
             _ => None,
         }
@@ -482,7 +482,7 @@ fn libpng_text(
         return true;
     }
     // tEXt／iTXt 配置 length+1，zTXt 配置 length（超過 png_chunk_max 時配置失敗）。
-    let need = len as u64 + u64::from(t != b"zTXt");
+    let need = u64::from(len) + u64::from(t != b"zTXt");
     let Some(p) = payload.filter(|_| need <= st.chunk_max) else {
         lib.warn(phase, t, "out of memory");
         return false;
@@ -605,19 +605,19 @@ fn libpng_iccp(lib: &mut Libpng, st: &LibState, phase: Phase, len: u32, payload:
         if plen < 132 {
             return Err(icc_msg(name, plen, "too short", false));
         }
-        if plen as u64 > st.chunk_max {
+        if u64::from(plen) > st.chunk_max {
             return Err(icc_msg(name, plen, "profile too long", false));
         }
         let h = h.to_vec();
         if let Some(m) = icc_header_error(lib, phase, name, plen, &h, st.color_type) {
             return Err(m);
         }
-        let tags = be32(&h[128..]) as u64;
+        let tags = u64::from(be32(&h[128..]));
         r.fill(132 + 12 * tags)?;
         if let Some(m) = icc_tag_error(lib, phase, name, plen, &r.out) {
             return Err(m);
         }
-        r.fill(plen as u64)?;
+        r.fill(u64::from(plen))?;
         Ok(plen)
     })();
     match result {
@@ -695,7 +695,7 @@ fn icc_header_error(
         return Some(icc_msg(name, plen, "invalid length", false));
     }
     let tags = be32(&h[128..]);
-    if tags > 357_913_930 || (plen as u64) < 132 + 12 * tags as u64 {
+    if tags > 357_913_930 || u64::from(plen) < 132 + 12 * u64::from(tags) {
         return Some(icc_msg(name, tags, "tag count too large", is_icc_signature(tags)));
     }
     let intent = be32(&h[64..]);
@@ -854,7 +854,7 @@ pub fn scan_png(f: &Input<'_>, limits: &Limits) -> PngScan {
             s.lib.fatal(phase_of(seen_idat, false), "bad header (invalid chunk)".into(), false);
             break;
         }
-        let chunk_end = pos + 12 + len as u64;
+        let chunk_end = pos + 12 + u64::from(len);
         // 串流在前面的 IDAT 就已經結束：這個 IDAT 的錯誤由 png_read_end 發現（after_image_data）。
         let idat_phase = if idat_z.state() == ZState::Running { Phase::InIdat } else { Phase::AfterIdat };
         if chunk_end > file_size {
@@ -877,18 +877,18 @@ pub fn scan_png(f: &Input<'_>, limits: &Limits) -> PngScan {
         // 小的已知 chunk 保留內容；其他的只串流計算 CRC。
         let wanted = !is_idat && &t != b"IEND";
         let keep = wanted
-            && (len as u64) <= limits.metadata_item_bytes()
-            && kept_total + len as u64 <= limits.metadata_file_bytes();
+            && u64::from(len) <= limits.metadata_item_bytes()
+            && kept_total + u64::from(len) <= limits.metadata_file_bytes();
         // libpng 相容檢查需要內容的 chunk：預算外的也暫時讀進來（有上限）。
         let lib_needs = matches!(&t, b"iCCP" | b"zTXt" | b"iTXt" | b"tEXt" | b"eXIf" | b"tRNS" | b"PLTE");
-        let capture = keep || (lib_needs && len as u64 <= LIB_CHECK_MAX);
+        let capture = keep || (lib_needs && u64::from(len) <= LIB_CHECK_MAX);
         let mut payload: Vec<u8> = Vec::new();
         if capture {
             payload.reserve_exact(len as usize);
         }
         let mut crc = crc32fast::Hasher::new();
         crc.update(&t);
-        let (mut off, mut left) = (pos + 8, len as u64);
+        let (mut off, mut left) = (pos + 8, u64::from(len));
         let mut io_fail = false;
         while left > 0 {
             let want = left.min(io.len() as u64) as usize;
@@ -925,14 +925,14 @@ pub fn scan_png(f: &Input<'_>, limits: &Limits) -> PngScan {
             s.lib.fatal(phase, format!("{ty}: CRC error"), false);
             if is_idat {
                 // CRC 在整個 chunk 讀完後才檢查：資料照樣交給解碼器。
-                s.feed.push((pos, 12 + len as u64));
-                s.idat_bytes += len as u64;
+                s.feed.push((pos, 12 + u64::from(len)));
+                s.idat_bytes += u64::from(len);
                 s.idat_chunks += 1;
             }
             break;
         }
         if keep {
-            kept_total += len as u64;
+            kept_total += u64::from(len);
         }
         if wanted && !keep {
             s.metadata_status = "over_limit";
@@ -951,16 +951,16 @@ pub fn scan_png(f: &Input<'_>, limits: &Limits) -> PngScan {
                 st.mode |= MODE_IDAT;
             }
             seen_idat = true;
-            s.idat_bytes += len as u64;
+            s.idat_bytes += u64::from(len);
             s.idat_chunks += 1;
-            s.feed.push((pos, 12 + len as u64));
+            s.feed.push((pos, 12 + u64::from(len)));
         } else if seen_idat && !idat_closed {
             idat_closed = true;
             st.mode |= MODE_AFTER_IDAT;
         }
         // 非調色盤影像不需要 PLTE，也不交給 png crate（libpng 對它只是警告）。
         if &t == b"IHDR" || &t == b"IEND" || (&t == b"PLTE" && s.color_type == 3) {
-            s.feed.push((pos, 12 + len as u64));
+            s.feed.push((pos, 12 + u64::from(len)));
         }
 
         let p = &payload[..];
@@ -975,11 +975,11 @@ pub fn scan_png(f: &Input<'_>, limits: &Limits) -> PngScan {
                 s.has_ihdr = true;
                 s.width = be32(p);
                 s.height = be32(&p[4..]);
-                s.bit_depth = p[8] as i32;
-                s.color_type = p[9] as i32;
-                s.compression = p[10] as i32;
-                s.filter = p[11] as i32;
-                s.interlace = p[12] as i32;
+                s.bit_depth = i32::from(p[8]);
+                s.color_type = i32::from(p[9]);
+                s.compression = i32::from(p[10]);
+                s.filter = i32::from(p[11]);
+                s.interlace = i32::from(p[12]);
                 st.color_type = s.color_type;
                 st.bit_depth = s.bit_depth;
                 if s.width == 0
@@ -1062,7 +1062,7 @@ pub fn scan_png(f: &Input<'_>, limits: &Limits) -> PngScan {
                 if len == 7 {
                     s.time = Some(format!(
                         "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
-                        (p[0] as u32) << 8 | p[1] as u32,
+                        u32::from(p[0]) << 8 | u32::from(p[1]),
                         p[2],
                         p[3],
                         p[4],
@@ -1075,7 +1075,7 @@ pub fn scan_png(f: &Input<'_>, limits: &Limits) -> PngScan {
             }
             b"orNT" if keep => {
                 if len == 1 {
-                    s.ornt = Some(p[0] as i32);
+                    s.ornt = Some(i32::from(p[0]));
                 }
             }
             b"tEXt" | b"zTXt" | b"iTXt" if keep => scan_text(&mut s, &t, p, limits),

@@ -769,7 +769,7 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Outcome {
             }
             input.progress.report(Stage::Analyze, a.st.rows + b.st.rows, total_rows);
             if same_layout && a.st.canon == b.st.canon {
-                stats.pixels += w as u64;
+                stats.pixels += u64::from(w);
                 continue;
             }
             for x in 0..w as usize {
@@ -778,14 +778,14 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Outcome {
                 let mut pixel_diff = false;
                 for c in 0..n {
                     let is_alpha = (a_alpha.is_some() || b_alpha.is_some()) && c == n - 1;
-                    let va = if is_alpha { a_alpha.map_or(alpha_max, |i| pa[i] as u32) } else { pa[c] as u32 };
-                    let vb = if is_alpha { b_alpha.map_or(alpha_max, |i| pb[i] as u32) } else { pb[c] as u32 };
+                    let va = if is_alpha { a_alpha.map_or(alpha_max, |i| u32::from(pa[i])) } else { u32::from(pa[c]) };
+                    let vb = if is_alpha { b_alpha.map_or(alpha_max, |i| u32::from(pb[i])) } else { u32::from(pb[c]) };
                     if va != vb {
                         let d = va.abs_diff(vb);
                         stats.differing[c] += 1;
                         stats.maxabs[c] = stats.maxabs[c].max(d);
-                        stats.sumabs[c] += d as u128;
-                        stats.sumsq[c] += (d as u128) * (d as u128);
+                        stats.sumabs[c] += u128::from(d);
+                        stats.sumsq[c] += u128::from(d) * u128::from(d);
                         pixel_diff = true;
                     }
                 }
@@ -794,14 +794,14 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Outcome {
                     if stats.first.len() < 16 {
                         stats.first.push(DiffEntry {
                             x: x as u64,
-                            y: y as u64,
-                            original: pa.iter().map(|&v| v as u32).collect(),
-                            output: pb.iter().map(|&v| v as u32).collect(),
+                            y: u64::from(y),
+                            original: pa.iter().map(|&v| u32::from(v)).collect(),
+                            output: pb.iter().map(|&v| u32::from(v)).collect(),
                         });
                     }
                 }
             }
-            stats.pixels += w as u64;
+            stats.pixels += u64::from(w);
         }
     }
     // 沒有比較（或中途停下）的一側仍然解到最後，才知道它本身是否完整。
@@ -811,7 +811,7 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Outcome {
         if s.dec.is_none() {
             continue;
         }
-        while !s.st.failed && s.st.rows < s.st.height as u64 {
+        while !s.st.failed && s.st.rows < u64::from(s.st.height) {
             if let Some(o) = stop(input.cancel) {
                 return o;
             }

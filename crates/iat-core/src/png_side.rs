@@ -63,12 +63,12 @@ fn pass_rows(h: u32, p: usize) -> u32 {
 /// 一側 PNG 逐列解碼所需的工具緩衝（同 C++ 版 `png_row_budget`）。
 pub fn png_row_budget(width: u32, bit_depth: i32, color_type: i32, has_trns: bool) -> Option<u64> {
     let l = layout_for(bit_depth, color_type, has_trns);
-    let bits = (width as u64).checked_mul(png_channels(color_type))?.checked_mul(bit_depth as u64)?;
+    let bits = u64::from(width).checked_mul(png_channels(color_type))?.checked_mul(bit_depth as u64)?;
     if l.channels == 0 {
         return None;
     }
     let rb = bits.div_ceil(8);
-    let canon = (width as u64).checked_mul(l.channels as u64)?.checked_mul(2)?;
+    let canon = u64::from(width).checked_mul(u64::from(l.channels))?.checked_mul(2)?;
     let rows3 = (rb + 64).checked_mul(3)?;
     rows3.checked_add(canon)?.checked_add(256 << 10)
 }
@@ -373,12 +373,12 @@ impl<'a> PngDecoder<'a> {
         let out_ch = layout.channels as usize;
         let packed = |i: usize| -> u32 {
             match depth {
-                16 => (row[2 * i] as u32) << 8 | row[2 * i + 1] as u32,
-                8 => row[i] as u32,
+                16 => u32::from(row[2 * i]) << 8 | u32::from(row[2 * i + 1]),
+                8 => u32::from(row[i]),
                 d => {
                     let bit = i * d as usize;
                     let shift = 8 - d - (bit & 7) as u32;
-                    (row[bit >> 3] as u32 >> shift) & ((1 << d) - 1)
+                    (u32::from(row[bit >> 3]) >> shift) & ((1 << d) - 1)
                 }
             }
         };
@@ -393,12 +393,12 @@ impl<'a> PngDecoder<'a> {
                     self.palette_oob = true; // 判定為解碼失敗，不替代
                 }
                 let k = if idx < npal { idx } else { 0 };
-                let pal = |c: usize| lib.palette.get(k * 3 + c).copied().unwrap_or(0) as u16;
+                let pal = |c: usize| u16::from(lib.palette.get(k * 3 + c).copied().unwrap_or(0));
                 px[0] = pal(0);
                 px[1] = pal(1);
                 px[2] = pal(2);
                 if out_ch == 4 {
-                    px[3] = lib.trns_alpha.get(idx).map_or(255, |&a| a as u16);
+                    px[3] = lib.trns_alpha.get(idx).map_or(255, |&a| u16::from(a));
                 }
             } else {
                 for (c, v) in px[..in_ch].iter_mut().enumerate() {
@@ -431,7 +431,7 @@ impl<'a> PngDecoder<'a> {
     fn decode_passes(&mut self, s: &mut SideState<'_>, issues: &mut Vec<Issue>) -> bool {
         let (w, h) = (self.scan.width, self.scan.height);
         let ch = s.layout.channels as usize;
-        let total_rows: u64 = (0..7).filter(|&p| pass_cols(w, p) > 0).map(|p| pass_rows(h, p) as u64).sum();
+        let total_rows: u64 = (0..7).filter(|&p| pass_cols(w, p) > 0).map(|p| u64::from(pass_rows(h, p))).sum();
         let mut read = 0u64;
         for p in 0..7 {
             let (pw, ph) = (pass_cols(w, p), pass_rows(h, p));
@@ -504,7 +504,7 @@ impl<'a> PngDecoder<'a> {
             if pw == 0 || y < YS[p] || !(y - YS[p]).is_multiple_of(YI[p]) {
                 continue;
             }
-            let ry = ((y - YS[p]) / YI[p]) as u64;
+            let ry = u64::from((y - YS[p]) / YI[p]);
             let row_bytes = pw as usize * ch * self.bps as usize;
             let temp = s.temp.as_mut().expect("open() reserved temp");
             if let Err(e) = temp.read_at(self.pass_off[p] + ry * row_bytes as u64, &mut self.store[..row_bytes]) {
@@ -518,13 +518,13 @@ impl<'a> PngDecoder<'a> {
                     s.canon[dst + c] = if self.bps == 2 {
                         u16::from_le_bytes([self.store[i], self.store[i + 1]])
                     } else {
-                        self.store[i] as u16
+                        u16::from(self.store[i])
                     };
                 }
             }
-            filled += pw as u64;
+            filled += u64::from(pw);
         }
-        if filled != w as u64 {
+        if filled != u64::from(w) {
             let e = crate::temp::TempError::new(
                 crate::temp::TempErrorKind::Internal,
                 format!("Adam7 row {y} covered {filled} of {w} columns"),
@@ -580,7 +580,8 @@ impl<'a> Decoder<'a> for PngDecoder<'a> {
         }
         // Adam7 另外需要一列儲存（重建用）與暫存的寫入緩衝。
         let l = layout_for(sc.bit_depth, sc.color_type, sc.has_trns);
-        let stored = (sc.width as u64).checked_mul(l.channels as u64)?.checked_mul(if l.bits > 8 { 2 } else { 1 })?;
+        let stored =
+            u64::from(sc.width).checked_mul(u64::from(l.channels))?.checked_mul(if l.bits > 8 { 2 } else { 1 })?;
         rows?.checked_add(stored)?.checked_add(WRITE_BUFFER as u64)
     }
 
@@ -595,7 +596,7 @@ impl<'a> Decoder<'a> for PngDecoder<'a> {
             return false;
         }
         let sc = &self.scan;
-        let rb = (sc.width as u64 * png_channels(sc.color_type) * sc.bit_depth as u64).div_ceil(8);
+        let rb = (u64::from(sc.width) * png_channels(sc.color_type) * sc.bit_depth as u64).div_ceil(8);
         let mut opts = DecodeOptions::default();
         // Adler-32 由 png_scan 獨立檢查（D-R11）：png crate 若自己檢查，小圖會在第一列之前就失敗。
         opts.set_ignore_adler32(true);
@@ -689,10 +690,10 @@ impl<'a> Decoder<'a> for PngDecoder<'a> {
             let mut total: u64 = 0;
             for p in 0..7 {
                 self.pass_off[p] = total;
-                let bytes = (pass_cols(w, p) as u64)
-                    .checked_mul(pass_rows(h, p) as u64)
-                    .and_then(|v| v.checked_mul(s.layout.channels as u64))
-                    .and_then(|v| v.checked_mul(self.bps as u64));
+                let bytes = u64::from(pass_cols(w, p))
+                    .checked_mul(u64::from(pass_rows(h, p)))
+                    .and_then(|v| v.checked_mul(u64::from(s.layout.channels)))
+                    .and_then(|v| v.checked_mul(u64::from(self.bps)));
                 let Some(sum) = bytes.and_then(|b| total.checked_add(b)) else {
                     s.failed = true;
                     s.rep.decode_status = "not_checked".into();
@@ -739,7 +740,7 @@ impl<'a> Decoder<'a> for PngDecoder<'a> {
             return true;
         }
         let y = s.rows;
-        if y + 1 == self.scan.height as u64
+        if y + 1 == u64::from(self.scan.height)
             && let Some(m) = self.idat_end_error.clone()
         {
             return self.fail(s, issues, Failure::Decode, m, format!("row {y}"), y > 0);
@@ -770,7 +771,7 @@ impl<'a> Decoder<'a> for PngDecoder<'a> {
         self.expand_row(&mut canon, &layout, self.scan.width);
         s.canon = canon;
         s.rows += 1;
-        if s.rows == self.scan.height as u64 {
+        if s.rows == u64::from(self.scan.height) {
             self.reached_idat_end = true;
         }
         true
@@ -779,7 +780,7 @@ impl<'a> Decoder<'a> for PngDecoder<'a> {
     fn finish(&mut self, s: &mut SideState<'a>, issues: &mut Vec<Issue>) {
         s.rep.coverage.rows_decoded = s.rows;
         let mut after_idat_read = false;
-        if !s.failed && s.rows == self.scan.height as u64 {
+        if !s.failed && s.rows == u64::from(self.scan.height) {
             after_idat_read = true;
             // png_read_end：IDAT 之後的 chunk（缺 IEND、CRC 錯誤、截斷）。
             if let Some(f) = self.scan.lib.fatal.as_ref().filter(|f| f.phase == Phase::AfterIdat) {
@@ -818,14 +819,14 @@ impl<'a> Decoder<'a> for PngDecoder<'a> {
 
 /// IDAT 解壓後應有的位元組數（每列加一個濾波位元組）。
 fn expected_idat_bytes(sc: &PngScan) -> u64 {
-    let row = |w: u32| (w as u64 * png_channels(sc.color_type) * sc.bit_depth as u64).div_ceil(8) + 1;
+    let row = |w: u32| (u64::from(w) * png_channels(sc.color_type) * sc.bit_depth as u64).div_ceil(8) + 1;
     if sc.interlace == 1 {
         (0..7)
             .filter(|&p| pass_cols(sc.width, p) > 0)
-            .map(|p| row(pass_cols(sc.width, p)) * pass_rows(sc.height, p) as u64)
+            .map(|p| row(pass_cols(sc.width, p)) * u64::from(pass_rows(sc.height, p)))
             .sum()
     } else {
-        row(sc.width) * sc.height as u64
+        row(sc.width) * u64::from(sc.height)
     }
 }
 
@@ -864,7 +865,7 @@ pub fn prepare_png<'a>(
     fr.interlace = sc.interlace; // 取自 IHDR，從不推測
     s.layout = layout_for(sc.bit_depth, sc.color_type, sc.has_trns);
     let fr = &mut s.rep;
-    fr.coverage.rows_total = sc.height as u64;
+    fr.coverage.rows_total = u64::from(sc.height);
     let sm = &mut fr.sample_model;
     sm.model = s.layout.model.into();
     sm.container_bits = sc.bit_depth as u32;

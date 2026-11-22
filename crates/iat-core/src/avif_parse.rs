@@ -1470,7 +1470,7 @@ fn clap_valid(c: &Clap, image_w: u32, image_h: u32) -> bool {
     if image_w > i32::MAX as u32 || image_h > i32::MAX as u32 {
         return false;
     }
-    let center = |dim: i32| if dim % 2 != 0 { (dim as i64, 2i64) } else { ((dim >> 1) as i64, 1i64) };
+    let center = |dim: i32| if dim % 2 != 0 { (i64::from(dim), 2i64) } else { (i64::from(dim >> 1), 1i64) };
     // avifFractionAdd／Sub：分母通分後檢查 int32 溢位
     let add = |a: (i64, i64), b: (i64, i64)| -> Option<(i64, i64)> {
         let (n, d) = if a.1 == b.1 { (a.0 + b.0, a.1) } else { (a.0 * b.1 + b.0 * a.1, a.1 * b.1) };

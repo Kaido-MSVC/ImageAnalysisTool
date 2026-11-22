@@ -830,7 +830,7 @@ impl<'a> Decoder<'a> for TiffDecoder<'a> {
                     self.loaded = Some(strip);
                     self.blocks_read += 1;
                 }
-                let at = ((y - strip * self.rps) as u64 * self.row_bytes) as usize;
+                let at = (u64::from(y - strip * self.rps) * self.row_bytes) as usize;
                 let len = self.row_bytes as usize;
                 let mut canon = std::mem::take(&mut s.canon);
                 self.convert(&mut canon, &self.buf[at..at + len], 0, self.sc.width);
@@ -853,7 +853,7 @@ impl<'a> Decoder<'a> for TiffDecoder<'a> {
                     self.buf = buf;
                     self.loaded = Some(ty);
                 }
-                let yy = (y - ty * self.tl) as u64;
+                let yy = u64::from(y - ty * self.tl);
                 let line = u64::from(self.tw) * self.px;
                 let mut canon = std::mem::take(&mut s.canon);
                 for tx in 0..self.across {
