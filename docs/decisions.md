@@ -494,6 +494,34 @@ C++ 版的訊息 `image resource 0x<id> name runs past the resource section` 在
 - 行為改變（實際輸出不變）：`win::write_all_raw` 遇到超過 4 GiB 的資料改為分段寫，原本的 `as u32` 會截斷；`webp_scan::vp8l_decoder_input` 在內容放不進 RIFF 的 32 位元大小欄位時回傳錯誤，不再截斷。兩者實際處理的資料都遠小於 4 GiB。
 - 以 `compare_iat.py` 對照 C++ 1.0.0：各類修正前後的 333 個案例都一致。
 
+### D-R22 安全與穩定審查後的修正（2026-11-22，2.0.0 發布前）
+
+rust-review 審查 unsafe、worker 通訊、配置失敗路徑、解析器、暫存檔與 Job、GUI 結束流程後的修正。
+報告與退出碼不變（完整比對見最後一條）。
+
+- **worker 的輸出一律不可信**：檢視模式的標頭先驗證（聲道數與模型相符、位元數 1..=16、寬高非 0、
+  像素數不超過檢視上限），才依它配置樣本緩衝；結尾的列數必須和實際收到的樣本數相符。任何錯誤
+  都把剩下的輸出讀完，worker 不會卡在寫入。stdout／stderr 超過上限後不再接上後面的片段。
+- **繼承的 handle**：worker 改由 `win::take_inherited_files` 一次取得（整個程序只能呼叫一次、值不重複、
+  不是標準 handle、必須帶繼承旗標），取代原本靠呼叫端承諾的 safe 函式；配置失敗用的通道改為
+  `&'static File`。管線建立時兩端都不可繼承，只在建立 worker 的那一刻打開清單內 handle 的繼承旗標。
+- **配置失敗的結束方式**：`ExitProcess` 改為 `TerminateProcess(GetCurrentProcess())`，不執行 TLS 回呼與
+  DLL detach（可能再配置或卡在鎖上）。stdout 與通道的內容先以同步的 `WriteFile` 寫出，結果不變。
+- **檢視一律在 worker 裡解碼**（修訂 D-R02 第三次修訂的「只有 AVIF」）：所有格式都套用 Job 上限與
+  `deadline_s`，不可信的檔案不在 GUI 程序裡解碼。代價是樣本要經過管線：16384×8192 RGB8 PNG
+  （`view_timing` 範例，各量 3 次）從 3.5～4.2 秒（程序內）變為 4.6～5.2 秒（worker）。
+- **期限**：C++ 1.0.0 的 `deadline_s` 從啟動 worker 起算，一次執行只有一個 worker。Rust 版的重跑
+  （rav1d panic、解碼器配置失敗，D-R02 第四次修訂）原本每次都重新給滿期限，總時間最多是好幾倍；
+  改為從第一次啟動 worker 起算，重跑共用剩下的時間，和 C++ 版「一次執行最多 `deadline_s`」一致。
+  只影響發生重跑而且總時間超過期限的情況。
+- **GUI**：檢視載入可以取消（換分析、重新進入檢視時取消舊的；過時的結果以世代編號丟掉）；
+  關閉視窗時取消分析與檢視，最多等 2 秒讓背景執行緒收尾，不再只靠程序結束時強制終止。
+  「以建議值重新分析」的值經過 `Limits::set` 的範圍檢查；MiB 換算成 bytes 一律飽和，不會溢位繞回。
+- **rav1d logger** 改用 `Dav1dLogger::new(None, None)`，不再以全 0 位元組建構。
+- 驗證：單元測試涵蓋畸形檢視標頭（位元數 0／17／32、聲道數與模型不符、高度 0 而寬度極大、
+  超過像素上限、列數超過高度或與樣本數不符）都回報錯誤、不配置樣本緩衝、讀完剩下的輸出。
+  完整比對（`--big`、`--local`、`--pairs`，含取消案例，指令見 `tests/compare/README.md`）385 個案例全部一致。
+
 ## 允許的差異
 
 比對腳本讀這張表；表格以外的差異一律算失敗。欄位為 JSON 的點路徑，或 `exit`、`stderr`、`markdown`；可用 `*` 萬用字元。

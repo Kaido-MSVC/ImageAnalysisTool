@@ -9,6 +9,29 @@ py -3.13 -I tests\compare\compare_iat.py `
   --rust target\release\iat.exe --out out\compare --accept png
 ```
 
+## 發布前的完整比對（385 個案例）
+
+比對腳本的 339 個案例加上 46 個私人樣本案例；不加 `--no-cancel`（含取消案例），加上大圖與私人樣本：
+
+```powershell
+cargo build --release
+py -3.13 -I tests\compare\compare_iat.py `
+  --cpp D:\projects\ImageAnalysisTool\dist\ImageAnalysisTool-1.0.0-win-x64\iat.exe `
+  --rust target\release\iat.exe --out out\compare_full `
+  --accept png,webp,psd,psb,tiff,bigtiff,jxl_codestream,jxl_container,avif `
+  --big D:\projects\iat-archive\big `
+  --local D:\projects\ImageAnalysisTool\tools\regress\cases.local.json `
+  --pairs D:\projects\iat-archive\regress-baseline\pairs
+```
+
+- 預期結果：不需解碼 34 個、本階段 351 個，全部一致（只有允許差異）。少了 `cancel_during_hash` 表示加了
+  `--no-cancel`；少了 5 個 `big_*` 表示沒加 `--big`；少了 46 個 `local_*` 表示沒加 `--local`／`--pairs`。
+- 大圖（不進 git，2026-11-22 從暫存資料夾移來）：
+  `D:\projects\iat-archive\big\big.jxl` SHA-256 `17a4a86e2985ecb7d2921c159fb03ca98daa3b6adab1247505f50872e2a068d1`；
+  `big.webp` SHA-256 `31b8108cf84287ea517cfa524fccb544de7f147fe60909cfd51dc0c3870a525f`。
+- 私人樣本的對照組：`D:\projects\iat-archive\regress-baseline\pairs`（`gen_pairs.py` 的輸出）。
+- 取消案例會在 `--out` 建立 16 GiB 的稀疏檔，`--out` 要放在 NTFS 磁碟上。
+
 - 案例：`tests/fixtures/generated/pairs.json` 的 pairs／singles，加上 C++ 版 `run_e2e.py` 裡不需要解碼器的參數、報告目標安全性、I/O 與取消案例。
 - 比對前去掉：`run_id`、`tool`（名稱、版本、編譯器）、`codecs`、`metrics`、`settings.temp.free_bytes_at_start`；文字裡的 run id 與各側的案例目錄也遮罩。
 - 允許的差異只看 `docs/decisions.md`「允許的差異」表格；表格以外的差異一律失敗。
