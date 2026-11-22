@@ -8,6 +8,8 @@ Use it to confirm that a "lossless" conversion really is lossless, for example P
 
 Version 2 is a rewrite in Rust of iat 1.0.0 (C++). The command line, exit codes and JSON report are the same as in 1.0.0, so programs that call 1.0.0 can switch without changes. New in 2: a desktop GUI (`iat-gui.exe`), and no C or C++ libraries are linked (all decoders are Rust crates).
 
+This repository's `main` branch is version 2.0.0 (Rust). The C++ version 1.x is kept unchanged on the [`cpp-1.x`](https://github.com/Kaido-MSVC/ImageAnalysisTool/tree/cpp-1.x) branch (tag `v1.0.0`, with its 1.0.0 release). Every difference from 1.0.0 is listed in [docs/differences.md](https://github.com/Kaido-MSVC/ImageAnalysisTool/blob/main/docs/differences.md).
+
 - Windows 10 / 11 x64, distributed as a zip with no installer (static CRT, no VC++ runtime needed).
 - Input files are always opened read-only; reports are only written to new files and never overwrite anything.
 - Decoding runs in a resource-limited child process (`iat-worker.exe` inside a Job Object) with caps on memory, temporary storage and time. When a cap is exceeded the result is "not checked" instead of a crash.
@@ -160,7 +162,7 @@ Verdicts, reason codes, exit codes and the JSON structure are the same as in 1.0
 - Memory use differs, so a run close to a `job_commit_mib` limit can finish in one version and be "not checked" in the other.
 - A few rare cases: a multi-layer JPEG XL still image does not get the `layered_image` (info) issue; lossy non-XYB JPEG XL statistics (`mae`, `rmse`) can differ slightly; some libtiff directory warnings and AVIF image sequences are handled differently.
 
-The full list, with the affected fields and whether each one can change a verdict, is in `docs/differences.md` in the source repository.
+The full list, with the affected fields and whether each one can change a verdict, is in [docs/differences.md](https://github.com/Kaido-MSVC/ImageAnalysisTool/blob/main/docs/differences.md).
 
 ## Integration example: IMB-C
 

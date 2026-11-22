@@ -8,6 +8,8 @@
 
 第 2 版是 iat 1.0.0（C++）的 Rust 重寫版。命令列、退出碼與 JSON 報告都和 1.0.0 相同，呼叫 1.0.0 的程式不用修改就能換用。第 2 版新增桌面 GUI（`iat-gui.exe`），而且不連結任何 C 或 C++ 函式庫（解碼器全部是 Rust crate）。
 
+這個 repo 的 `main` 分支是 2.0.0（Rust 版）。C++ 版 1.x 原樣保留在 [`cpp-1.x`](https://github.com/Kaido-MSVC/ImageAnalysisTool/tree/cpp-1.x) 分支（tag `v1.0.0` 與 1.0.0 的發布都在）。和 1.0.0 的所有差異列在 [docs/differences.md](https://github.com/Kaido-MSVC/ImageAnalysisTool/blob/main/docs/differences.md)。
+
 - Windows 10／11 x64，zip 免安裝（靜態 CRT，不需另裝 VC++ 執行階段）。
 - 輸入檔一律唯讀開啟；報告只寫入新檔，絕不覆寫。
 - 解碼在受資源限制的子程序（Job Object 裡的 `iat-worker.exe`）中進行，記憶體、暫存與時間都有上限；超過上限時回報「未檢查」，不會當機。
@@ -160,7 +162,7 @@ FileReport 的重點欄位：`name`、`path`（只在 `--full-paths`）、`size_
 - 記憶體用量不同，接近 `job_commit_mib` 上限的執行可能一邊完成、一邊「未檢查」。
 - 少數罕見情況：多圖層的 JPEG XL 靜止影像不會出現 `layered_image`（info）；非 XYB 的有損 JPEG XL 統計值（`mae`、`rmse`）可能略有不同；部分 libtiff 讀目錄時的警告與 AVIF 影像序列的處理方式不同。
 
-完整清單（含影響的欄位、是否影響判定）見原始碼 repo 的 `docs/differences.md`。
+完整清單（含影響的欄位、是否影響判定）見 [docs/differences.md](https://github.com/Kaido-MSVC/ImageAnalysisTool/blob/main/docs/differences.md)。
 
 ## 整合範例：IMB-C
 
