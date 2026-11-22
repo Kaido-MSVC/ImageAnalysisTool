@@ -292,7 +292,7 @@ fn read_channel(f: &mut File, progress: &dyn Progress) -> SideFailures {
 
 /// 正在 rav1d 裡解碼的一側（0：沒有；1：original；2：output）。panic hook 依此寫通道。
 static AV1_DECODING: AtomicU8 = AtomicU8::new(0);
-static CHANNEL: Mutex<Option<File>> = Mutex::new(None);
+static CHANNEL: Mutex<Option<&'static File>> = Mutex::new(None);
 
 /// AV1 解碼期間標記這一側；離開時（含 unwind）清除。
 pub(crate) struct Av1Guard;
@@ -316,8 +316,8 @@ fn write_record(kind: u8, a: u64, b: u64) {
     rec[1..9].copy_from_slice(&a.to_le_bytes());
     rec[9..17].copy_from_slice(&b.to_le_bytes());
     // panic hook 也會呼叫：鎖不住時（理論上不會）就放棄這筆，不能卡住
-    if let Ok(mut g) = CHANNEL.try_lock()
-        && let Some(f) = g.as_mut()
+    if let Ok(g) = CHANNEL.try_lock()
+        && let Some(mut f) = *g
     {
         // 父程序提早關閉通道時進度就不再送，不影響分析
         let _ignored = f.write_all(&rec);
@@ -432,25 +432,24 @@ fn worker_error(kind: &str, message: &str) -> Vec<u8> {
     serde_json::json!({ "worker_error": kind, "message": message }).to_string().into_bytes()
 }
 
-/// 同一個 handle 值只取一次（兩個 File 擁有同一個 handle 會重複關閉）。
+/// 取得命令列上的 handle（[`win::take_inherited_files`] 檢查重複與有效性，整個程序只取一次）。
 fn take_files(a: &Args) -> Result<(File, Option<File>, [File; 2], File), String> {
-    let mut seen = Vec::new();
-    let mut take = |v: Option<u64>, what: &str| -> Result<File, String> {
-        let v = v.ok_or_else(|| format!("missing {what} handle"))?;
-        if seen.contains(&v) {
-            return Err(format!("{what} handle repeats another handle"));
-        }
-        seen.push(v);
-        win::inherited_file(v).ok_or_else(|| format!("{what} handle is not valid"))
-    };
-    let channel = take(a.channel, "channel")?;
-    let original = take(a.original, "original")?;
-    let output = match (a.mode, a.output) {
-        (Some(WorkerMode::Compare), o) => Some(take(o, "output")?),
-        _ => None,
-    };
-    let temp = [take(a.temp[0], "temp-a")?, take(a.temp[1], "temp-b")?];
-    Ok((original, output, temp, channel))
+    let need = |v: Option<u64>, what: &str| v.ok_or_else(|| format!("missing {what} handle"));
+    let compare = a.mode == Some(WorkerMode::Compare);
+    let mut values = vec![
+        need(a.channel, "channel")?,
+        need(a.original, "original")?,
+        need(a.temp[0], "temp-a")?,
+        need(a.temp[1], "temp-b")?,
+    ];
+    if compare {
+        values.push(need(a.output, "output")?);
+    }
+    let mut files = win::take_inherited_files(&values)?.into_iter();
+    let mut next = || files.next().ok_or_else(|| "inherited handle count mismatch".to_string());
+    let (channel, original, temp_a, temp_b) = (next()?, next()?, next()?, next()?);
+    let output = if compare { Some(next()?) } else { None };
+    Ok((original, output, [temp_a, temp_b], channel))
 }
 
 /// iat-worker.exe 的進入點：回傳程序的結束代碼。
@@ -473,8 +472,9 @@ pub fn worker_main(argv: &[String]) -> i32 {
             return 2;
         }
     };
-    // CHANNEL 從不清空：配置器用的 handle 值存活到程序結束
-    win::set_alloc_failure_channel(&channel);
+    // 通道存活到程序結束：配置器存下的 handle 值不會被其他物件重新使用
+    let channel: &'static File = Box::leak(Box::new(channel));
+    win::set_alloc_failure_channel(channel);
     *CHANNEL.lock().expect("channel lock poisoned") = Some(channel);
     let result = panic::catch_unwind(AssertUnwindSafe(|| run_mode(&a, &original, output.as_ref(), &temp, &mut out)));
     let code = match result {

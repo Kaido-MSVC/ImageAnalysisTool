@@ -29,7 +29,7 @@ use windows_sys::Win32::Storage::FileSystem::{
     INVALID_FILE_ATTRIBUTES, MOVEFILE_WRITE_THROUGH, MoveFileExW,
 };
 use windows_sys::Win32::System::Console::{CTRL_BREAK_EVENT, CTRL_C_EVENT, CTRL_CLOSE_EVENT, SetConsoleCtrlHandler};
-use windows_sys::Win32::System::Console::{GetStdHandle, STD_OUTPUT_HANDLE};
+use windows_sys::Win32::System::Console::{GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE};
 use windows_sys::Win32::System::Diagnostics::Debug::{
     FORMAT_MESSAGE_FROM_SYSTEM, FORMAT_MESSAGE_IGNORE_INSERTS, FormatMessageW,
 };
@@ -534,21 +534,51 @@ impl WorkerChild {
     }
 }
 
-/// worker 端：取得父程序在命令列上傳來、已繼承的 handle。不是有效 handle 時為 None。
-/// 每個值只能取一次（呼叫者負責：同一個值不能交給兩個 File）。
-pub fn inherited_file(value: u64) -> Option<File> {
-    let h = usize::try_from(value).ok()? as HANDLE;
-    if h.is_null() {
-        return None;
+/// 把繼承來的 handle 包成 File。
+///
+/// # Safety
+///
+/// `h` 必須是有效、可繼承，而且本程序沒有其他擁有者的 handle；同一個值只能交出一次。
+unsafe fn adopt_inherited(h: HANDLE) -> File {
+    // SAFETY: 由呼叫者保證。
+    unsafe { File::from_raw_handle(h as RawHandle) }
+}
+
+/// [`take_inherited_files`] 已經呼叫過。
+static INHERITED_TAKEN: AtomicBool = AtomicBool::new(false);
+
+/// worker 端：一次取得父程序在命令列上傳來、已繼承的全部 handle（依 `values` 的順序）。
+///
+/// 整個程序只能呼叫一次，並在開啟任何檔案之前呼叫。以下情況回傳錯誤（說明第幾個值）而不取用任何 handle：
+/// 已經呼叫過、值重複、是標準輸入／輸出／錯誤的 handle、不是有效的 handle，或沒有繼承旗標
+/// （繼承來的 handle 保留這個旗標；系統與本程序自己開的 handle 沒有）。
+///
+/// # Errors
+///
+/// 見上；文字為英文，worker 原樣寫進 `bad_argument`。
+pub fn take_inherited_files(values: &[u64]) -> Result<Vec<File>, String> {
+    if INHERITED_TAKEN.swap(true, Ordering::SeqCst) {
+        return Err("inherited handles were already taken".into());
     }
-    let mut flags = 0u32;
-    // SAFETY: 只查詢旗標；無效的 handle 會讓呼叫失敗而不是未定義行為。
-    if unsafe { GetHandleInformation(h, &mut flags) } == 0 {
-        return None;
+    // SAFETY: 只讀取本程序的標準 handle 值。
+    let std_handles = [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE].map(|n| unsafe { GetStdHandle(n) });
+    let mut handles: Vec<HANDLE> = Vec::with_capacity(values.len());
+    for (i, &v) in values.iter().enumerate() {
+        let h = usize::try_from(v).map_err(|_| format!("handle {i} is out of range"))? as HANDLE;
+        if h.is_null() || h == INVALID_HANDLE_VALUE || std_handles.contains(&h) || handles.contains(&h) {
+            return Err(format!("handle {i} is null, a standard handle or repeated"));
+        }
+        let mut flags = 0u32;
+        // SAFETY: 只查詢旗標；無效的 handle 會讓呼叫失敗而不是未定義行為。
+        if unsafe { GetHandleInformation(h, &mut flags) } == 0 || flags & HANDLE_FLAG_INHERIT == 0 {
+            return Err(format!("handle {i} is not a valid inherited handle"));
+        }
+        handles.push(h);
     }
-    // SAFETY: 父程序為這個程序建立並列入繼承清單的 handle，本程序沒有其他地方擁有它；
-    // 呼叫者保證同一個值只取一次。
-    Some(unsafe { File::from_raw_handle(h as RawHandle) })
+    // SAFETY: 整個程序只走到這裡一次（INHERITED_TAKEN）；每個值都不同、不是標準 handle，而且帶著
+    // 繼承旗標。worker 從不把自己開的 handle 設為可繼承，所以這些 handle 只能來自父程序的繼承清單，
+    // 本程序沒有其他擁有者。
+    Ok(handles.into_iter().map(|h| unsafe { adopt_inherited(h) }).collect())
 }
 
 /// worker 端的程序設定（同 C++ 版 `worker_main`）：主控台中斷只交給父程序處理，
@@ -576,9 +606,9 @@ static ALLOC_CHANNEL: AtomicUsize = AtomicUsize::new(0);
 /// 通道紀錄的種類：配置失敗的一側（格式同 `worker` 的通道紀錄，17 bytes）。
 pub(crate) const REC_ALLOC_FAILED: u8 = 3;
 
-/// worker 端：登記通道，配置失敗時把出事的一側寫進去。`channel` 必須存活到程序結束
-/// （worker 把它放在 static 裡，從不關閉）；handle 已關閉時寫入只會失敗，不會有其他影響。
-pub fn set_alloc_failure_channel(channel: &File) {
+/// worker 端：登記通道，配置失敗時把出事的一側寫進去。`'static` 保證這個 handle 到程序結束都不會被
+/// 關閉，所以存下的值不會指到之後重新使用同一個值的其他物件。
+pub fn set_alloc_failure_channel(channel: &'static File) {
     ALLOC_CHANNEL.store(channel.as_raw_handle() as usize, Ordering::SeqCst);
 }
 
@@ -664,6 +694,17 @@ mod tests {
     #[test]
     fn error_text_is_english() {
         assert_eq!(error_text(2), "2: The system cannot find the file specified.");
+    }
+
+    /// 整個測試程序只有這裡呼叫 take_inherited_files（它只能呼叫一次）。
+    #[test]
+    fn inherited_handles_are_checked_and_taken_once() {
+        // 標準輸出的 handle（測試程序裡未必可繼承）與 null 都不收；失敗時不取用任何 handle
+        // SAFETY: 只讀取本程序的標準 handle 值。
+        let out = unsafe { GetStdHandle(STD_OUTPUT_HANDLE) } as usize as u64;
+        let e = take_inherited_files(&[0]).unwrap_err();
+        assert!(e.contains("handle 0 is null"), "{e}");
+        assert_eq!(take_inherited_files(&[out]).unwrap_err(), "inherited handles were already taken");
     }
 
     #[test]
