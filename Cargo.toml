@@ -3,7 +3,8 @@ resolver = "3"
 members = ["crates/iat-av1", "crates/iat-core", "crates/iat-cli", "crates/iat-gui", "crates/iat-worker"]
 
 [workspace.package]
-version = "0.1.0"
+# D-R10：`iat --version` 必須恰為 `iat X.Y.Z`（IMB-C 要求 ≥ 0.5.1），不可有預發布後綴
+version = "2.0.0"
 edition = "2024"
 rust-version = "1.100"
 license = "MIT"

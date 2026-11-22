@@ -118,3 +118,18 @@ impl Progress for NoProgress {
 pub(crate) fn ms_since(t0: Instant) -> f64 {
     t0.elapsed().as_secs_f64() * 1000.0
 }
+
+#[cfg(test)]
+mod tests {
+    /// D-R10：IMB-C 要求 `iat --version` 恰為 `iat X.Y.Z`，不可有預發布或建置後綴。
+    #[test]
+    fn version_is_plain_semver() {
+        let parts: Vec<&str> = super::VERSION.split('.').collect();
+        assert_eq!(parts.len(), 3, "version {}", super::VERSION);
+        assert!(
+            parts.iter().all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit())),
+            "version {}",
+            super::VERSION
+        );
+    }
+}
