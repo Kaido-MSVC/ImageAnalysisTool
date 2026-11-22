@@ -31,7 +31,7 @@ fn boxes(b: &[u8], start: usize, end: usize) -> Vec<([u8; 4], usize, usize)> {
         } else if size == 0 {
             size = end - p;
         }
-        if size < hdr || p + size > end {
+        if size < hdr || p.checked_add(size).is_none_or(|box_end| box_end > end) {
             break;
         }
         out.push((t, p + hdr, p + size));
@@ -93,7 +93,7 @@ fn parse(b: &[u8]) -> Option<Items> {
                         p += os as usize;
                         let l = be(b, p, ls as usize)?;
                         p += ls as usize;
-                        ext.push((base + o, l));
+                        ext.push((base.checked_add(o)?, l));
                     }
                     it.locs.push((id as u32, ext));
                 }
@@ -120,7 +120,8 @@ fn payload(b: &[u8], it: &Items, id: u32) -> Option<Vec<u8>> {
     let (_, ext) = it.locs.iter().find(|(i, _)| *i == id)?;
     let mut v = Vec::new();
     for &(o, l) in ext {
-        v.extend_from_slice(b.get(usize::try_from(o).ok()?..usize::try_from(o + l).ok()?)?);
+        let end = o.checked_add(l)?;
+        v.extend_from_slice(b.get(usize::try_from(o).ok()?..usize::try_from(end).ok()?)?);
     }
     Some(v)
 }
