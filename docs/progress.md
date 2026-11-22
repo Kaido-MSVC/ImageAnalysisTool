@@ -1,10 +1,10 @@
 # iat Rust 版進度報告
 
-Nov 21, 2026 · @YU SIANG CHEN
+Nov 22, 2026 · @YU SIANG CHEN
 
 ## 總覽
 
-八個階段完成了前七個（階段 0 到 6）。比對腳本中已涵蓋的 333 個案例全部和 C++ 版 1.0.0 一致；允許的差異除了訊息文字與解碼器名稱，只有 JXL 的兩項（暫時缺少的 `layered_image` 與一張非 XYB 有損圖的誤差統計，見 D-R18）。分析從階段 6 起和 C++ 版一樣在 `iat-worker.exe` 裡執行。下一步是階段 7（收尾）。
+八個階段全部完成（階段 0 到 7），版本為 2.0.0，發布用的 zip 已能產生（不推送、不公開發布）。比對腳本的 339 個案例與 46 個私人樣本案例全部和 C++ 版 1.0.0 一致，只有 `docs/differences.md` 第 1 節列出的允許差異。剩下的是 IMB-C 實測（步驟在 `docs/imbc-trial.md`，由你操作）。
 
 | 階段 | 內容 | 狀態 | 比對結果 |
 | --- | --- | --- | --- |
@@ -15,7 +15,7 @@ Nov 21, 2026 · @YU SIANG CHEN
 | 4 | TIFF | 完成 | 134/134 |
 | 5 | JXL | 完成 | 43/43 |
 | 6 | AVIF（rav1d）與 worker | 完成 | AVIF 23/23，原有 310 個維持一致 |
-| 7 | 收尾：封包、圖示、版本 2.0.0、IMB-C 實測 | 尚未開始 | — |
+| 7 | 收尾：封包、圖示、版本 2.0.0、GUI 收尾、IMB-C 實測準備 | 完成（IMB-C 實測待你操作） | 339/339、私人樣本 46/46 |
 
 階段 1、3、4、5、6 的 301 個格式案例中，問題代碼、`decode_status`、`rows_decoded`、色彩與 metadata 判定都和 C++ 版相同。
 
@@ -97,13 +97,25 @@ Nov 21, 2026 · @YU SIANG CHEN
 - **發布結構**：`cargo build --release` 在同一個資料夾產出 `iat.exe`、`iat-worker.exe`（與 `iat-gui.exe`），都只匯入系統 DLL。
 - **依賴**：rav1d 1.1.0（BSD-2-Clause）；`paste`（rav1d 的 proc-macro）的「不再維護」通知加進 deny.toml 的忽略清單；windows-sys 多開 5 個 feature、serde_json 開 `float_roundtrip`。`cargo deny check` 通過。
 
+**階段 7：收尾**（提交 8b51cb4 起）
+
+- **Job 上限的報告形式**（D-R02 第四次修訂）：worker 在解碼器呼叫中配置失敗時，經通道告訴父程序是哪一側、哪個階段，父程序重跑一次把那一側照 C++ 版判為 `resource_limit`，報告其餘部分照常。C++ `run_e2e.py` 的 `job_commit_limit` 已加進比對腳本並一致；另用 C++ 建置產生的大圖（`--big`）驗證 JXL、WebP 的形式。C++ 版 `jxlbig_allocator`、`webpbig_job_limit` 的設定下 Rust 版用的記憶體較少、解碼完成，列為允許差異。
+- **版本 2.0.0**：`iat --version` 輸出 `iat 2.0.0`。
+- **程式圖示**：`assets/icons/`；winresource 0.1.34 把圖示與版本資訊嵌入三個執行檔，GUI 視窗也有圖示（D-R20）。
+- **封包**：`scripts/package.ps1` 產生 `dist\ImageAnalysisTool-2.0.0-win-x64.zip`（SHA-256 `829a9436…d32`）。三個執行檔都不匯入 VC++／UCRT 的 DLL；解壓到新資料夾後 CLI、worker（AVIF）與 GUI 都能直接執行，SHA256SUMS 全部相符。THIRD_PARTY_NOTICES 用 cargo-about 0.9.3 產生（2026-11-22 經同意安裝），含 libjxl ICC 資料表與 Slint 兩節。README（英文、繁中）與 CHANGELOG 新增。
+- **差異總表**：`docs/differences.md`，分成允許的差異、已知差異（未觸發）、刻意修正的錯誤處理、保留的 C++ 版問題、Rust 版新增功能，附封存 C++ 版前的參考。
+- **GUI**：記住介面語言；「以建議值（N MiB）重新分析」（12000×8637 PNG 對 JXL：建議 1536，重新分析後完成比對）；「像素一致」標題（未標記 PNG→JXL、WebP→PNG 兩組，匯出的 JSON 和 CLI 相同）；色彩欄顯示 `jxl_enum (sRGB)`。
+- **安全通報**：RUSTSEC-2026-0592（url 2.5.8，經 Slint）依新規則只升到 2.5.9（form_urlencoded 隨之升到 1.2.3）。
+- **IMB-C 實測準備**：`docs/imbc-trial.md`（放置方式、樣本與轉換、確認 IMB-C 接受 2.0.0 與 iat-worker.exe、和 C++ 版的對照方式）。
+- 驗證：`cargo deny check`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace` 都通過。
+
 ## 重要決策
 
 完整內容在 repo 的 `docs/decisions.md`，這裡只列重點。規劃書 `docs/plan.md` 本身沒有改動，所有修訂都記在這些編號裡。
 
 | 編號 | 決策 |
 | --- | --- |
-| D-R02 | 所有格式的分析都在獨立的 `iat-worker.exe` 裡執行（Job Object 套 `job_commit_mib`）；配置失敗回報 `resource_limit`、解碼器 panic 判為解碼錯誤；GUI 的 AVIF 檢視也走 worker |
+| D-R02 | 所有格式的分析都在獨立的 `iat-worker.exe` 裡執行（Job Object 套 `job_commit_mib`）；解碼器呼叫中配置失敗時照 C++ 版把那一側判為 `resource_limit`（第四次修訂）、解碼器 panic 判為解碼錯誤；GUI 的 AVIF 檢視也走 worker |
 | D-R03 | iat-core 的 unsafe 只允許在 `win.rs` 和之後的 AV1 包裝，每段附 `// SAFETY:` 註解 |
 | D-R10 | IMB-C 會檢查版本號（≥ 0.5.1）和 `iat-worker.exe` 是否存在；階段 7 改為 2.0.0，IMB-C 維持不改 |
 | D-R11 | PNG：`png` crate 只解影像列，Adler-32 由 `png_scan` 另外完整驗證 |
@@ -115,6 +127,7 @@ Nov 21, 2026 · @YU SIANG CHEN
 | D-R17 | TIFF：不用 tiff crate，自己讀 strip／tile 並照 libtiff 4.7.2 的行為；libtiff 讀目錄時的部分警告沒有重做，列為已知風險 |
 | D-R18 | JXL：jxl-rs 解碼、libjxl 的 ICC 查表、自己解析 ImageMetadata；圖層數、配置上限與自訂色彩列舉值的 ICC 是已知差異 |
 | D-R19 | AVIF：rav1d 解碼、平面直接讀取、不做 YUV→RGB；libavif 行為的 item 解析；grid 與 limited range alpha 照 libavif；`ispe` 與畫格不符判為 `decoder_disagrees_with_parse` |
+| D-R20 | 階段 7：版本 2.0.0、winresource 嵌入圖示、封包與 THIRD_PARTY_NOTICES（cargo-about）、GUI 的語言設定／以建議值重新分析／「像素一致」 |
 
 **AV1**：rav1d 1.1.0 關掉 `asm`，只開 `bitdepth_8`、`bitdepth_16`；包裝層獨立成 `crates/iat-av1`。rav1d 內部有大量 unsafe，放進 worker 隔離。實測速度可以接受，不開 asm。
 
@@ -134,7 +147,7 @@ Nov 21, 2026 · @YU SIANG CHEN
 
 ## 待辦與下一步
 
-下一步是階段 7（收尾：封包、圖示、版本 2.0.0、IMB-C 實測）。
+下一步是 IMB-C 實測（`docs/imbc-trial.md`，由你操作），結果記回本報告。
 
 **已完成的小項目**（2026-11-21）
 
@@ -147,14 +160,17 @@ Nov 21, 2026 · @YU SIANG CHEN
 - TIFF：libtiff 讀目錄時的部分警告（tag 的 count／型別不正確而略過等）沒有重做，遇到時問題代碼會和 C++ 版不同（D-R17）。
 - PNG：gAMA、sRGB、iCCP 的 libpng 內容檢查仍未經真實樣本驗證（D-R12）。
 - JXL：多圖層的靜止影像不產生 `layered_image`；自訂色彩列舉值沒有 ICC（D-R18）。
-- 配置上限：C++ 版的 libpng、libjxl 各有自己的配置器上限（`job_commit_mib` − 64 MiB），超過時那一側判為 `resource_limit`、報告其餘部分照常。Rust 版是 worker 在 Job 上限配置失敗，回報執行層級的 `resource_limit`：退出碼與 `decode_status` 相同，但報告少了各側的其他欄位（例如 C++ `run_e2e.py` 的 `job_commit_limit`，D-R02）。事前預估擋下的情況和 C++ 版完全相同。
+- 配置上限：報告形式已和 C++ 版一致（D-R02 第四次修訂）。剩下的差異是記憶體用量：接近上限時兩版可能一個完成、一個 `resource_limit`；PNG 中途失敗時 `rows_decoded` 為 0。事前預估擋下的情況和 C++ 版完全相同。
 - AVIF：主要 brand 為 `avis` 的影像序列不解析（直接回報不支援）；gain map、sample transform、`a1op`／`lsel` 的 libavif 檢查沒有全部重做；`ispe` 與畫格尺寸不同時判為 `decoder_disagrees_with_parse`（D-R19）。
 - rav1d 的記憶體錯誤（不是 panic）讓 worker 中止時，判為 `worker_crashed`（C++ 版是 `decode_error`）。
 
 **留到後面階段**
 
-- [ ] 階段 7：版本改為 2.0.0、設計程式圖示（C++ 版沒有圖示，要重新設計）、IMB-C 不改程式實測換用
-- [ ] GUI：記住介面語言的設定
+- [x] 階段 7：版本 2.0.0、程式圖示、封包、差異總表、GUI 收尾（2026-11-22）
+- [x] GUI：記住介面語言的設定
+- [ ] IMB-C 不改程式實測換用（步驟見 `docs/imbc-trial.md`，由你操作）
+- [ ] 介面語言的下拉選單「選了就存檔」只有單元測試與讀取端的實測：這個環境無法用無障礙操作選取 Slint 下拉清單的項目，請手動切一次語言、重開確認
+- [ ] 建議值超過可用記憶體的警告文字沒有在畫面上實測（需要建議值大於目前可用記憶體的檔案）
 - [ ] 在 C++ repo 開 issue，記下上一節的問題
 - [ ] 決定是否把 `docs/jxl-rs-upstream-proposal.md` 提交給 jxl-rs 上游；上游支援後補做 `layered_image`
 

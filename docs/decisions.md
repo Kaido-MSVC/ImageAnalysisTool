@@ -472,6 +472,18 @@ C++ 版的訊息 `image resource 0x<id> name runs past the resource section` 在
 
 新增的直接依賴：rav1d 1.1.0（BSD-2-Clause），見 dependencies.md。
 
+### D-R20 階段 7：版本、圖示、封包與 GUI 的收尾（2026-11-22）
+
+- **版本 2.0.0**（D-R10）：workspace 的 `version` 改為 `2.0.0`；`iat --version` 恰為 `iat 2.0.0`，單元測試確認版本沒有預發布或建置後綴。
+- **圖示與版本資訊**：`assets/icons/`（使用者提供的 `iat-rust.ico` 與原始 PNG；GUI 視窗用的 256×256 PNG 由 `extract_ico_png.py` 從 .ico 原樣取出）。三個執行檔用 winresource 0.1.34 嵌入（選擇理由見 dependencies.md），GUI 視窗用 Slint 的 `Window.icon`。
+- **封包**（`scripts/package.ps1`）：照 C++ 版的 zip 結構，檔名 `ImageAnalysisTool-<版本>-win-x64.zip`；內容為三個執行檔、README（英文與繁中）、CHANGELOG、LICENSE、THIRD_PARTY_NOTICES、`licenses/`、SHA256SUMS。封包前檢查版本、檔案版本資訊、三個執行檔都不匯入 VC++／UCRT 執行階段 DLL，並確認 THIRD_PARTY_NOTICES 和目前的 Cargo.lock 一致。
+- **THIRD_PARTY_NOTICES**：cargo-about 0.9.3 產生（`--frozen`，不連網），另外固定列出 libjxl 產生的 ICC 資料表與 Slint。cargo-about 0.9.3 取不到 LicenseRef 的條文（`src/generate.rs` 的篩選條件寫反），Slint 免版稅授權的條文因此放在 `licenses/`。
+- **GUI**：
+  - 介面語言存在 `%APPDATA%\iat\gui-settings.json`（`{"language": "zh_TW"}`，存語系代碼不存索引）；優先順序 `IAT_GUI_LANG` > 設定檔 > Windows 顯示語言。設定檔先寫暫存檔再改名。
+  - 「以建議值重新分析」：只讀報告的結構化欄位 `resource_need`（`limit == "job_commit_mib"` 且有 `suggested_value`，兩側取大），不解析訊息文字。同一組檔案與設定，只換 `job_commit_mib`；結果畫面註明這次用的上限。建議值超過 `GlobalMemoryStatusEx` 的可用實體記憶體時加警告，仍可執行。
+  - 「像素一致」：compare、strict 為 `indeterminate`、samples 為 `equal`、原因只有 `color_unverified` 時的 GUI 標題，顏色介於成功與警告之間，下方寫出雙方的色彩來源；strict 判定與退出碼照常顯示。報告、JSON 與退出碼不變（GUI 匯出的 JSON 和 CLI 相同，已實測兩組）。
+  - 色彩欄的 `jxl_enum` 後面加上色彩空間名稱（依 libjxl 的列舉值，例如 `sRGB`、`Display P3`、`Rec. 2100 PQ`，其餘組合寫出白點／原色／轉換函數）。
+
 ## 允許的差異
 
 比對腳本讀這張表；表格以外的差異一律算失敗。欄位為 JSON 的點路徑，或 `exit`、`stderr`、`markdown`；可用 `*` 萬用字元。
