@@ -22,7 +22,6 @@ use windows_sys::Win32::Foundation::{
 };
 use windows_sys::Win32::Globalization::{CSTR_EQUAL, CompareStringOrdinal};
 use windows_sys::Win32::Security::Cryptography::{BCRYPT_USE_SYSTEM_PREFERRED_RNG, BCryptGenRandom};
-use windows_sys::Win32::Security::SECURITY_ATTRIBUTES;
 use windows_sys::Win32::Storage::FileSystem::WriteFile;
 use windows_sys::Win32::Storage::FileSystem::{
     FILE_ID_128, FILE_ID_INFO, FileIdInfo, GetDiskFreeSpaceExW, GetFileAttributesW, GetFileInformationByHandleEx,
@@ -232,27 +231,22 @@ fn set_inheritable(h: RawHandle, on: bool) -> bool {
     unsafe { SetHandleInformation(h as HANDLE, HANDLE_FLAG_INHERIT, if on { HANDLE_FLAG_INHERIT } else { 0 }) != 0 }
 }
 
-/// 匿名管線：(讀取端，給本程序；寫入端，給 worker)。寫入端交給 [`spawn_worker`] 繼承後關閉。
+/// 匿名管線：(讀取端，給本程序；寫入端，給 worker)。兩端建立時都不可繼承；寫入端由
+/// [`spawn_worker`] 只在建立 worker 的那一刻設為可繼承，之後關閉。
 ///
 /// # Errors
 ///
-/// CreatePipe 或設定繼承旗標失敗。
+/// CreatePipe 失敗。
 pub fn pipe() -> Result<(File, OwnedHandle), SpawnError> {
-    let sa = SECURITY_ATTRIBUTES {
-        nLength: dword_size_of::<SECURITY_ATTRIBUTES>(),
-        lpSecurityDescriptor: std::ptr::null_mut(),
-        bInheritHandle: 1,
-    };
     let (mut r, mut w): (HANDLE, HANDLE) = (std::ptr::null_mut(), std::ptr::null_mut());
-    // SAFETY: 兩個輸出指標指向本地變數；sa 在呼叫期間有效。
-    if unsafe { CreatePipe(&mut r, &mut w, &sa, 0) } == 0 {
+    // SAFETY: 兩個輸出指標指向本地變數；安全屬性為 null（handle 不可繼承）。
+    if unsafe { CreatePipe(&mut r, &mut w, std::ptr::null(), 0) } == 0 {
         return Err(SpawnError::last("CreatePipe"));
     }
-    // SAFETY: CreatePipe 成功，兩個 handle 都屬於本程序且只在這裡取得擁有權。
-    let (r, w) = unsafe { (File::from_raw_handle(r as RawHandle), own(w)) };
-    if !set_inheritable(r.as_raw_handle(), false) {
-        return Err(SpawnError::last("SetHandleInformation"));
-    }
+    // SAFETY: CreatePipe 成功，讀取端屬於本程序且只在這裡取得擁有權。
+    let r = unsafe { File::from_raw_handle(r as RawHandle) };
+    // SAFETY: 同上，寫入端。
+    let w = unsafe { own(w) };
     Ok((r, w))
 }
 
@@ -410,7 +404,12 @@ pub fn spawn_worker(
     }
     for &h in &list {
         if !set_inheritable(h as RawHandle, true) {
-            return Err(SpawnError::last("SetHandleInformation"));
+            let e = SpawnError::last("SetHandleInformation");
+            // 已設的輸入與暫存檔恢復成不可繼承；管線與 NUL 的 handle 隨 drop 關閉
+            for f in inherit {
+                set_inheritable(f.as_raw_handle(), false);
+            }
+            return Err(e);
         }
     }
     let result = create_suspended(&job, exe, args, &list, &nul, &out_w, &err_w);
