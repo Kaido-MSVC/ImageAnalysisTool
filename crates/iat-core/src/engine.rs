@@ -131,9 +131,9 @@ pub struct SideState<'a> {
 }
 
 impl SideState<'_> {
-    /// 下一列的列號（read_row() 只在 rows < height 時被呼叫）。
+    /// read_row() 要產生的列號，也就是已完成的列數（read_row() 只在 rows < height 時被呼叫）。
     #[expect(clippy::cast_possible_truncation, reason = "rows < height，height 是 u32")]
-    pub fn next_row(&self) -> u32 {
+    pub fn current_row(&self) -> u32 {
         self.rows as u32
     }
 }

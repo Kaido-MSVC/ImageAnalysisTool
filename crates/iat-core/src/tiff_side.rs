@@ -815,7 +815,7 @@ impl<'a> Decoder<'a> for TiffDecoder<'a> {
         if s.failed {
             return false;
         }
-        let y = s.next_row();
+        let y = s.current_row();
         match self.mode {
             Mode::Strips => {
                 let strip = y / self.rps;

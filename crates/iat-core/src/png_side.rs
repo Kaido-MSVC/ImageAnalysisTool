@@ -501,7 +501,7 @@ impl<'a> PngDecoder<'a> {
     /// 從包含這一列的各個 pass 重建影像第 s.rows 列；每一欄必須剛好填一次。
     fn reconstruct_row(&mut self, s: &mut SideState<'_>, issues: &mut Vec<Issue>) -> bool {
         let ch = s.layout.channels as usize;
-        let y = s.next_row();
+        let y = s.current_row();
         let w = self.scan.width;
         let mut filled = 0u64;
         for p in 0..7 {
