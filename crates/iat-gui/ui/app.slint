@@ -59,6 +59,20 @@ export global Words {
         if (s == "inspect_mode") { return @tr("inspect mode"); }
         return s;
     }
+
+    // 色彩來源的白話說明（EffectiveColor.kind 與 Rust 端整理的細節）；只用於「像素一致」的說明行。
+    public pure function color-source(kind: string, detail: string) -> string {
+        if (kind == "none") { return @tr("no colour information"); }
+        if (kind == "webp_default_srgb") { return @tr("sRGB (WebP default)"); }
+        if (kind == "jxl_enum") { return detail == "" ? @tr("JPEG XL colour enum") : @tr("{} (JPEG XL colour enum)", detail); }
+        if (kind == "srgb") { return @tr("sRGB (sRGB chunk)"); }
+        if (kind == "chrm_gama" || kind == "partial") { return @tr("partial colour information ({})", detail); }
+        if (kind == "cicp") { return @tr("CICP {}", detail); }
+        if (kind == "icc") { return @tr("embedded ICC profile"); }
+        if (kind == "icc_unreadable") { return @tr("unreadable ICC profile"); }
+        if (kind == "tiff_colorimetry") { return @tr("TIFF colorimetry tags"); }
+        return kind;
+    }
 }
 
 export struct IssueRow {
@@ -102,6 +116,21 @@ export struct ResultInfo {
     original: FileInfo,
     output: FileInfo,
     run-id: string,
+    // 「像素一致」：strict 無法判定、樣本相等、原因只有 color_unverified（只改 GUI 的呈現）
+    pixel-identical: bool,
+    // 色彩欄的依據（jxl_enum 已附上色彩空間名稱）
+    color-text: string,
+    color-original-kind: string,
+    color-original-detail: string,
+    color-output-kind: string,
+    color-output-detail: string,
+    // 報告 resource_need 的 job_commit_mib 建議值（MiB）；0 表示沒有
+    suggested-mib: int,
+    // 建議值超過目前可用的實體記憶體
+    suggest-over-memory: bool,
+    available-mib: int,
+    // 這次是以建議值重新分析時用的 job_commit_mib（MiB）；0 表示不是
+    raised-mib: int,
 }
 
 global Tone {
@@ -109,6 +138,8 @@ global Tone {
     out property <color> good: dark ? #6ccb8a : #1b7a3d;
     out property <color> bad: dark ? #ff8a80 : #b3261e;
     out property <color> warn: dark ? #f0c05a : #8a5a00;
+    // 介於 good 與 warn 之間：「像素一致」（樣本相同，只有色彩描述無法證明等價）
+    out property <color> near: dark ? #bccf5e : #586d10;
     out property <color> muted: dark ? #a8a8a8 : #5f5f5f;
 }
 
@@ -287,13 +318,16 @@ component RunPage inherits VerticalLayout {
 
 component Verdict inherits VerticalLayout {
     in property <ResultInfo> info;
-    property <color> tone: info.exit-code == 0 ? Tone.good : info.exit-code == 1 || info.exit-code == 3 || info.exit-code == 5 ? Tone.bad : Tone.warn;
+    callback rerun-suggested();
+    property <color> tone: info.pixel-identical ? Tone.near
+        : info.exit-code == 0 ? Tone.good : info.exit-code == 1 || info.exit-code == 3 || info.exit-code == 5 ? Tone.bad : Tone.warn;
     spacing: 4px;
     Text {
         font-size: 22px;
         font-weight: 700;
         color: root.tone;
-        text: info.exit-code == 0 ? (info.compare ? @tr("Strict match") : @tr("File is clean"))
+        text: info.pixel-identical ? @tr("Pixel identical")
+            : info.exit-code == 0 ? (info.compare ? @tr("Strict match") : @tr("File is clean"))
             : info.exit-code == 1 ? @tr("Strict mismatch")
             : info.exit-code == 2 ? @tr("Indeterminate")
             : info.exit-code == 3 ? @tr("Decode or structure failure")
@@ -302,14 +336,38 @@ component Verdict inherits VerticalLayout {
     }
     Text {
         wrap: word-wrap;
-        text: info.exit-code == 0 ? (info.compare ? @tr("Samples, colour and metadata agree.") : @tr("The file decoded completely; container and metadata are valid."))
+        text: info.pixel-identical ? @tr("Every sample is identical. The two files describe their colour differently, so the tool cannot prove the colours are the same.")
+            : info.exit-code == 0 ? (info.compare ? @tr("Samples, colour and metadata agree.") : @tr("The file decoded completely; container and metadata are valid."))
             : info.exit-code == 1 ? @tr("The files differ. See the reasons and issues below.")
             : info.exit-code == 2 ? @tr("The tool could not prove a match or a mismatch.")
             : info.exit-code == 3 ? @tr("At least one file is damaged or failed to decode.")
             : info.exit-code == 4 ? @tr("Stopped by a resource limit, the deadline or cancellation.")
             : @tr("An input could not be read, or the environment failed.");
     }
+    if info.pixel-identical: Text {
+        wrap: word-wrap;
+        text: @tr("Colour source: original is {}; output is {}.",
+            Words.color-source(info.color-original-kind, info.color-original-detail),
+            Words.color-source(info.color-output-kind, info.color-output-detail));
+    }
     Secondary { text: @tr("Exit code {} ({}) · strict: {}", info.exit-code, Words.status(info.exit-reason), Words.status(info.strict)); }
+    if info.raised-mib > 0: Secondary { text: @tr("This run used the suggested memory limit: job_commit_mib = {} MiB.", info.raised-mib); }
+    if info.suggested-mib > 0: HorizontalLayout {
+        padding-top: 6px;
+        spacing: 12px;
+        alignment: start;
+        Button {
+            text: @tr("Re-analyze with the suggested value ({} MiB)", info.suggested-mib);
+            clicked => { root.rerun-suggested(); }
+        }
+        if info.suggest-over-memory: Text {
+            vertical-alignment: center;
+            wrap: word-wrap;
+            horizontal-stretch: 1;
+            color: Tone.warn;
+            text: @tr("More than the memory available now ({} MiB). The analysis may fail or slow down the computer.", info.available-mib);
+        }
+    }
 }
 
 component KeyValue inherits HorizontalLayout {
@@ -337,10 +395,11 @@ component ResultsPage inherits VerticalLayout {
     callback export-md();
     callback view-images();
     callback new-run();
+    callback rerun-suggested();
 
     padding: 20px;
     spacing: 12px;
-    Verdict { info: root.info; }
+    Verdict { info: root.info; rerun-suggested => { root.rerun-suggested(); } }
     VerticalLayout {
         spacing: 4px;
         FileLine { key: @tr("Original"); file: info.original; }
@@ -352,7 +411,7 @@ component ResultsPage inherits VerticalLayout {
         }
         if info.compare: KeyValue {
             key: @tr("Colour");
-            value: info.color-basis == "" ? Words.status(info.color-status) : Words.status(info.color-status) + " (" + info.color-basis + ")";
+            value: info.color-text == "" ? Words.status(info.color-status) : Words.status(info.color-status) + " (" + info.color-text + ")";
         }
         if info.compare && info.metadata.length == 0: KeyValue { key: @tr("Metadata"); value: Words.status("same"); }
         if info.compare && info.metadata.length > 0: HorizontalLayout {
@@ -613,6 +672,7 @@ export component AppWindow inherits Window {
     callback export-md();
     callback enter-viewer();
     callback probe(int, int);
+    callback rerun-suggested();
 
     VerticalLayout {
         Rectangle {
@@ -672,6 +732,7 @@ export component AppWindow inherits Window {
             export-md => { root.export-md(); }
             view-images => { root.page = 3; root.enter-viewer(); }
             new-run => { root.page = 0; }
+            rerun-suggested => { root.rerun-suggested(); }
         }
         if root.page == 3: ViewerPage {
             vertical-stretch: 1;

@@ -210,6 +210,15 @@ pub fn language_from_locales<I: IntoIterator<Item = String>>(locales: I) -> usiz
     0
 }
 
+/// 設定檔裡保存的語系代碼；`language_from_locales` 讀得回同一個語言。
+pub fn language_code(language: usize) -> &'static str {
+    match language {
+        1 => "zh_TW",
+        2 => "ja",
+        _ => "en",
+    }
+}
+
 /// `select_bundled_translation` 用的語系目錄名稱。
 pub fn translation_name(language: usize) -> &'static str {
     match language {
@@ -295,5 +304,8 @@ mod tests {
         assert_eq!(language_from_locales(v(&["fr-FR", "ja-JP", "en-US"])), 2);
         assert_eq!(language_from_locales(v(&["de-DE"])), 0);
         assert_eq!(translation_name(1), "zh_TW");
+        for l in 0..3 {
+            assert_eq!(language_from_locales(v(&[language_code(l)])), l, "saved code reads back");
+        }
     }
 }

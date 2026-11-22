@@ -30,7 +30,9 @@
 | weezl | 0.1.12 | 0.1.12 | MIT OR Apache-2.0 | 階段 4：TIFF 的 LZW 解壓（TIFF 早換碼寬、輸出滿了就停；舊式碼用 LSB 順序），照 libtiff 的行為包裝（D-R17） |
 | rav1d | 1.1.0（`default-features = false`，feature `bitdepth_8`、`bitdepth_16`） | 1.1.0 | BSD-2-Clause | 階段 6：AV1 解碼，只經 `crates/iat-av1` 的安全包裝使用；不編入組合語言（不開 `asm`），日誌關閉（D-R09、D-R19） |
 
-windows-sys 啟用的 feature：`Win32_Foundation`、`Win32_Globalization`、`Win32_Storage_FileSystem`、`Win32_System_Console`、`Win32_System_Diagnostics_Debug`、`Win32_Security_Cryptography`；階段 6 為了 worker 加上 `Win32_Security`、`Win32_System_IO`、`Win32_System_JobObjects`、`Win32_System_Pipes`、`Win32_System_Threading`（D-R02 第三次修訂，D-R03 階段 6 增補）。沒有新增 crate。
+windows-sys 啟用的 feature：`Win32_Foundation`、`Win32_Globalization`、`Win32_Storage_FileSystem`、`Win32_System_Console`、`Win32_System_Diagnostics_Debug`、`Win32_Security_Cryptography`；階段 6 為了 worker 加上 `Win32_Security`、`Win32_System_IO`、`Win32_System_JobObjects`、`Win32_System_Pipes`、`Win32_System_Threading`（D-R02 第三次修訂，D-R03 階段 6 增補）。沒有新增 crate。階段 7 加上 `Win32_System_SystemInformation`（`GlobalMemoryStatusEx`：GUI 判斷建議的 `job_commit_mib` 是否超過可用的實體記憶體，呼叫放在 `win.rs`）。
+
+階段 7 的 iat-gui 多依賴 serde 與 serde_json（workspace 原本就有，沒有新增 crate）：保存介面語言的設定檔 `%APPDATA%\iat\gui-settings.json`。
 
 ## 間接依賴（Cargo.lock）
 

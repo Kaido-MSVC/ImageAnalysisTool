@@ -371,3 +371,51 @@ msgstr "這張影像（{}）太大，無法檢視。結果與匯出報告不受�
 
 msgid "inspect mode"
 msgstr "單檔檢查模式"
+
+msgid "no colour information"
+msgstr "沒有色彩資訊"
+
+msgid "sRGB (WebP default)"
+msgstr "sRGB（WebP 預設）"
+
+msgid "JPEG XL colour enum"
+msgstr "JPEG XL 色彩列舉值"
+
+msgid "{} (JPEG XL colour enum)"
+msgstr "{}（JPEG XL 色彩列舉值）"
+
+msgid "sRGB (sRGB chunk)"
+msgstr "sRGB（sRGB chunk）"
+
+msgid "partial colour information ({})"
+msgstr "部分色彩資訊（{}）"
+
+msgid "CICP {}"
+msgstr "CICP {}"
+
+msgid "embedded ICC profile"
+msgstr "內嵌 ICC 描述檔"
+
+msgid "unreadable ICC profile"
+msgstr "無法讀取的 ICC 描述檔"
+
+msgid "TIFF colorimetry tags"
+msgstr "TIFF 色度標籤"
+
+msgid "Pixel identical"
+msgstr "像素一致"
+
+msgid "Every sample is identical. The two files describe their colour differently, so the tool cannot prove the colours are the same."
+msgstr "所有樣本都相同。兩個檔案描述色彩的方式不同，所以無法證明色彩相同。"
+
+msgid "Colour source: original is {}; output is {}."
+msgstr "色彩來源：原檔是「{}」，輸出是「{}」。"
+
+msgid "This run used the suggested memory limit: job_commit_mib = {} MiB."
+msgstr "這次使用建議的記憶體上限：job_commit_mib = {} MiB。"
+
+msgid "Re-analyze with the suggested value ({} MiB)"
+msgstr "以建議值（{} MiB）重新分析"
+
+msgid "More than the memory available now ({} MiB). The analysis may fail or slow down the computer."
+msgstr "超過目前可用的記憶體（{} MiB），分析可能失敗或讓電腦變慢。"

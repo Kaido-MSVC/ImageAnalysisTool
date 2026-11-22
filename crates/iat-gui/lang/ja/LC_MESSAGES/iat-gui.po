@@ -371,3 +371,51 @@ msgstr "この画像（{}）は大きすぎて表示できません。結果と�
 
 msgid "inspect mode"
 msgstr "単独検査モード"
+
+msgid "no colour information"
+msgstr "色情報なし"
+
+msgid "sRGB (WebP default)"
+msgstr "sRGB（WebP の既定値）"
+
+msgid "JPEG XL colour enum"
+msgstr "JPEG XL の色列挙値"
+
+msgid "{} (JPEG XL colour enum)"
+msgstr "{}（JPEG XL の色列挙値）"
+
+msgid "sRGB (sRGB chunk)"
+msgstr "sRGB（sRGB チャンク）"
+
+msgid "partial colour information ({})"
+msgstr "部分的な色情報（{}）"
+
+msgid "CICP {}"
+msgstr "CICP {}"
+
+msgid "embedded ICC profile"
+msgstr "埋め込み ICC プロファイル"
+
+msgid "unreadable ICC profile"
+msgstr "読み取れない ICC プロファイル"
+
+msgid "TIFF colorimetry tags"
+msgstr "TIFF の測色タグ"
+
+msgid "Pixel identical"
+msgstr "ピクセル一致"
+
+msgid "Every sample is identical. The two files describe their colour differently, so the tool cannot prove the colours are the same."
+msgstr "すべてのサンプルが同じです。2 つのファイルは色の記述方法が異なるため、色が同じであることは証明できません。"
+
+msgid "Colour source: original is {}; output is {}."
+msgstr "色の情報源：元ファイルは「{}」、出力は「{}」。"
+
+msgid "This run used the suggested memory limit: job_commit_mib = {} MiB."
+msgstr "今回は推奨のメモリ上限を使用しました：job_commit_mib = {} MiB。"
+
+msgid "Re-analyze with the suggested value ({} MiB)"
+msgstr "推奨値（{} MiB）で再分析"
+
+msgid "More than the memory available now ({} MiB). The analysis may fail or slow down the computer."
+msgstr "現在使用可能なメモリ（{} MiB）を超えています。分析が失敗するか、コンピューターが遅くなる可能性があります。"

@@ -44,6 +44,7 @@ use windows_sys::Win32::System::JobObjects::{
     JobObjectExtendedLimitInformation, QueryInformationJobObject, SetInformationJobObject, TerminateJobObject,
 };
 use windows_sys::Win32::System::Pipes::CreatePipe;
+use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
 use windows_sys::Win32::System::Threading::{
     CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW, CREATE_SUSPENDED, CreateProcessW, DeleteProcThreadAttributeList,
     EXTENDED_STARTUPINFO_PRESENT, ExitProcess, GetExitCodeProcess, InitializeProcThreadAttributeList,
@@ -106,6 +107,15 @@ pub fn disk_free_bytes(dir: &Path) -> Result<u64, u32> {
 }
 
 /// 與 C++ 版 `path_exists` 相同：取得屬性成功，或因共用衝突而失敗都算存在。
+/// 目前可用的實體記憶體（bytes，`GlobalMemoryStatusEx` 的 `ullAvailPhys`）；查詢失敗時為 None。
+/// GUI 用來判斷建議的 `job_commit_mib` 是否超過可用記憶體。
+pub fn available_physical_memory() -> Option<u64> {
+    let mut st = MEMORYSTATUSEX { dwLength: std::mem::size_of::<MEMORYSTATUSEX>() as u32, ..Default::default() };
+    // SAFETY: st 是本地變數，dwLength 已設為結構大小（API 的要求）。
+    let ok = unsafe { GlobalMemoryStatusEx(&mut st) };
+    (ok != 0).then_some(st.ullAvailPhys)
+}
+
 pub fn path_exists(p: &Path) -> bool {
     let w = wide(p.as_os_str());
     // SAFETY: w 以 NUL 結尾。

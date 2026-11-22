@@ -51,7 +51,9 @@ $fresh = Join-Path $dist "THIRD_PARTY_NOTICES-$version.check.txt"
 if (Test-Path -LiteralPath $fresh) { Remove-Item -LiteralPath $fresh }
 & (Join-Path $PSScriptRoot 'gen_third_party.ps1') -Output $fresh
 if (-not (Test-Path -LiteralPath $notices)) { throw 'THIRD_PARTY_NOTICES.txt not found: run scripts/gen_third_party.ps1' }
-$same = (Get-FileHash -LiteralPath $fresh).Hash -eq (Get-FileHash -LiteralPath $notices).Hash
+# Compared without line endings: git's autocrlf may have checked the committed file out with CRLF.
+$lf = { param($p) [IO.File]::ReadAllText($p).Replace("`r`n", "`n") }
+$same = (& $lf $fresh) -ceq (& $lf $notices)
 Remove-Item -LiteralPath $fresh
 if (-not $same) { throw 'THIRD_PARTY_NOTICES.txt is out of date: run scripts/gen_third_party.ps1 and commit the result' }
 

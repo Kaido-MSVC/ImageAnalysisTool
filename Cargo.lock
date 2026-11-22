@@ -2125,6 +2125,8 @@ version = "2.0.0"
 dependencies = [
  "iat-core",
  "rfd",
+ "serde",
+ "serde_json",
  "slint",
  "slint-build",
  "sys-locale",

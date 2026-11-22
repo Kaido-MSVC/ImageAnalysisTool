@@ -4,6 +4,8 @@
 #![windows_subsystem = "windows"]
 
 mod display;
+mod settings;
+mod summary;
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -129,7 +131,13 @@ fn file_info(f: &FileReport) -> FileInfo {
     }
 }
 
-fn result_info(r: &Report) -> ResultInfo {
+/// MiB 數值給 Slint 的 int（上限 1 TiB = 1048576 MiB，放得進 i32）。
+fn mib_int(v: u64) -> i32 {
+    i32::try_from(v).unwrap_or(i32::MAX)
+}
+
+/// `raised`：這次分析是「以建議值重新分析」時用的 `job_commit_mib`。
+fn result_info(r: &Report, raised: Option<u64>) -> ResultInfo {
     let metadata: Vec<MetaRow> = r
         .metadata
         .fields
@@ -137,7 +145,23 @@ fn result_info(r: &Report) -> ResultInfo {
         .filter(|f| f.status != "same" && f.status != "both_absent")
         .map(|f| MetaRow { name: f.name.as_str().into(), status: f.status.as_str().into() })
         .collect();
+    let suggested = summary::suggested_job_commit_mib(r);
+    // 建議值超過目前可用的實體記憶體時加警告（仍允許執行）；查不到可用記憶體時不警告。
+    let avail_mib = iat_core::win::available_physical_memory().map(|b| b >> 20);
+    let over_memory = matches!((suggested, avail_mib), (Some(s), Some(a)) if s > a);
+    let (orig_kind, orig_detail) = summary::color_source(&r.original);
+    let (out_kind, out_detail) = r.output.as_ref().map(summary::color_source).unwrap_or_default();
     ResultInfo {
+        pixel_identical: summary::pixel_identical(r),
+        color_text: summary::color_basis_text(r).into(),
+        color_original_kind: orig_kind.into(),
+        color_original_detail: orig_detail.into(),
+        color_output_kind: out_kind.into(),
+        color_output_detail: out_detail.into(),
+        suggested_mib: suggested.map_or(0, mib_int),
+        suggest_over_memory: over_memory,
+        available_mib: avail_mib.map_or(0, mib_int),
+        raised_mib: raised.map_or(0, mib_int),
         compare: r.mode == "compare",
         exit_code: r.exit.code,
         exit_reason: r.exit.reason.as_str().into(),
@@ -156,7 +180,7 @@ fn result_info(r: &Report) -> ResultInfo {
     }
 }
 
-fn show_report(ui: &AppWindow, req: RunRequest, r: Report) {
+fn show_report(ui: &AppWindow, req: RunRequest, r: Report, raised: Option<u64>) {
     let rows: Vec<IssueRow> = r
         .issues
         .iter()
@@ -167,7 +191,7 @@ fn show_report(ui: &AppWindow, req: RunRequest, r: Report) {
             message: i.message.as_str().into(),
         })
         .collect();
-    ui.set_result(result_info(&r));
+    ui.set_result(result_info(&r, raised));
     ui.set_issues(ModelRc::new(VecModel::from(rows)));
     ui.set_export_status(0);
     ui.set_has_result(true);
@@ -193,6 +217,22 @@ fn start(ui: &AppWindow) {
     }) else {
         return;
     };
+    run_request(ui, req, None);
+}
+
+/// 「以建議值重新分析」：上一次的檔案與設定不變，只把 `job_commit_mib` 換成報告的建議值。
+fn rerun_with_suggestion(ui: &AppWindow) {
+    let Some((mut req, suggested)) =
+        with_state(|s| s.last.as_ref().and_then(|(req, r)| Some((req.clone(), summary::suggested_job_commit_mib(r)?))))
+    else {
+        return;
+    };
+    req.limits.job_commit_mib = suggested;
+    run_request(ui, req, Some(suggested));
+}
+
+/// 在背景執行緒分析；`raised` 是以建議值重新分析時的上限（結果畫面註明）。
+fn run_request(ui: &AppWindow, req: RunRequest, raised: Option<u64>) {
     let cancel = CancelToken::new();
     with_state(|s| s.cancel = Some(cancel.clone()));
     ui.set_stage(0);
@@ -203,7 +243,7 @@ fn start(ui: &AppWindow) {
     std::thread::spawn(move || {
         let progress = GuiProgress { ui: weak.clone(), last: Mutex::new(None) };
         let report = run_analysis(&req, &cancel, &progress);
-        post(&weak, move |ui| show_report(&ui, req, report));
+        post(&weak, move |ui| show_report(&ui, req, report, raised));
     });
 }
 
@@ -357,6 +397,15 @@ fn select_language(ui: &AppWindow, language: usize) {
     }
 }
 
+/// 介面上選的語言存進使用者設定；寫不進去時只少了「下次記住」，不影響操作。
+fn remember_language(language: usize) {
+    let Some(path) = settings::settings_path() else { return };
+    let s = settings::Settings { language: Some(display::language_code(language).into()) };
+    if let Err(e) = settings::save(&path, &s) {
+        eprintln!("iat-gui: cannot save {}: {e}", path.display());
+    }
+}
+
 fn install_drop_handler(ui: &AppWindow) {
     use slint::winit_030::winit::event::WindowEvent;
     use slint::winit_030::{EventResult, WinitWindowAccessor};
@@ -398,8 +447,10 @@ fn install_drop_handler(ui: &AppWindow) {
 fn main() -> Result<(), slint::PlatformError> {
     let ui = AppWindow::new()?;
     ui.set_version(iat_core::VERSION.into());
-    // IAT_GUI_LANG（en、zh_TW、ja）優先於 Windows 顯示語言。
-    let locales: Vec<String> = std::env::var("IAT_GUI_LANG").into_iter().chain(sys_locale::get_locales()).collect();
+    // 介面語言的優先順序：IAT_GUI_LANG（en、zh_TW、ja）> 上次在介面上選的 > Windows 顯示語言。
+    let saved = settings::settings_path().map(|p| settings::load(&p)).and_then(|s| s.language);
+    let locales: Vec<String> =
+        std::env::var("IAT_GUI_LANG").into_iter().chain(saved).chain(sys_locale::get_locales()).collect();
     select_language(&ui, display::language_from_locales(locales));
     install_drop_handler(&ui);
     // `iat-gui <原檔> [<輸出檔>]`：預先填入（檔案總管的「開啟檔案」也會這樣傳入）。
@@ -414,7 +465,15 @@ fn main() -> Result<(), slint::PlatformError> {
     let weak = ui.as_weak();
     ui.on_language_selected(move |i| {
         if let Some(ui) = weak.upgrade() {
-            select_language(&ui, usize::try_from(i).unwrap_or(0));
+            let language = usize::try_from(i).unwrap_or(0);
+            select_language(&ui, language);
+            remember_language(language);
+        }
+    });
+    let weak = ui.as_weak();
+    ui.on_rerun_suggested(move || {
+        if let Some(ui) = weak.upgrade() {
+            rerun_with_suggestion(&ui);
         }
     });
     let weak = ui.as_weak();
