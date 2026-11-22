@@ -121,7 +121,7 @@ pub(crate) fn ms_since(t0: Instant) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    /// D-R10：IMB-C 要求 `iat --version` 恰為 `iat X.Y.Z`，不可有預發布或建置後綴。
+    /// D-R10：IMB-C 要求 `iat --version` 恰為 `iat X.Y.Z`，不可有預發布或建置字尾。
     #[test]
     fn version_is_plain_semver() {
         let parts: Vec<&str> = super::VERSION.split('.').collect();

@@ -95,7 +95,7 @@ GUI 視窗圖示用 Slint 的 `Window.icon`（`@image-url`），圖檔是從 .ic
 
 | 日期 | 通報 | crate | 處理 |
 |---|---|---|---|
-| 2026-11-22 | RUSTSEC-2026-0592（`Url::origin()` 遇到層層嵌套的 `blob:` URL 會堆疊溢位） | url 2.5.8（經 Slint：i-slint-compiler、webbrowser） | 經同意以 `cargo update -p url --precise 2.5.9` 只升這個 patch 版本；url 2.5.9 要求 form_urlencoded 1.2.3，Cargo.lock 一併從 1.2.2 升級。iat 本身不解析不可信的 URL。`cargo deny check` 通過，THIRD_PARTY_NOTICES 已重產 |
+| 2026-11-22 | RUSTSEC-2026-0592（`Url::origin()` 遇到層層巢狀的 `blob:` URL 會堆疊溢位） | url 2.5.8（經 Slint：i-slint-compiler、webbrowser） | 經同意以 `cargo update -p url --precise 2.5.9` 只升這個 patch 版本；url 2.5.9 要求 form_urlencoded 1.2.3，Cargo.lock 一併從 1.2.2 升級。iat 本身不解析不可信的 URL。`cargo deny check` 通過，THIRD_PARTY_NOTICES 已重產 |
 
 ## 尚未加入（規劃書已選定）
 
