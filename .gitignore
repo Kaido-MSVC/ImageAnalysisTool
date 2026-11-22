@@ -9,3 +9,5 @@ __pycache__/
 /.claude/
 # 本機的專案規則（含本機路徑），不公開
 /CLAUDE.md
+# 本機實測步驟（含私人樣本的位置與檔名），不公開
+/docs/imbc-trial.md
