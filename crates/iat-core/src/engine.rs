@@ -1271,8 +1271,6 @@ pub(crate) struct ViewSamples {
 /// 檢視解碼的停止原因。
 pub(crate) enum ViewStop {
     Cancelled,
-    /// 樣本緩衝無法配置（bytes）
-    TooLarge(u64),
     /// 寬×高超過呼叫者給的檢視上限
     OverViewLimit {
         width: u32,
@@ -1280,7 +1278,7 @@ pub(crate) enum ViewStop {
     },
 }
 
-/// 檢視解碼的列接收端：同一個程序裡收進記憶體，或在 worker 裡寫到 stdout。
+/// 檢視解碼的列接收端：worker 裡寫到 stdout（測試則收進記憶體）。
 pub(crate) trait ViewSink {
     /// 版面確定、解碼器開始之後，第一列之前呼叫一次。
     fn begin(&mut self, layout: &RowLayout, width: u32, height: u32) -> Result<(), ViewStop>;
@@ -1288,18 +1286,18 @@ pub(crate) trait ViewSink {
     fn row(&mut self, canon: &[u16]) -> Result<(), ViewStop>;
 }
 
-/// 收進記憶體的接收端（先一次預留整張的大小）。
+/// 測試用：在本程序裡收進記憶體的接收端（測試圖都很小）。
+#[cfg(test)]
 #[derive(Default)]
 pub(crate) struct VecSink {
     pub samples: Vec<u16>,
 }
 
+#[cfg(test)]
 impl ViewSink for VecSink {
     fn begin(&mut self, layout: &RowLayout, width: u32, height: u32) -> Result<(), ViewStop> {
-        let total = u64::from(width).saturating_mul(u64::from(layout.channels)).saturating_mul(u64::from(height));
-        let bytes = total.saturating_mul(2);
-        let total = usize::try_from(total).map_err(|_| ViewStop::TooLarge(bytes))?;
-        self.samples.try_reserve_exact(total).map_err(|_| ViewStop::TooLarge(bytes))
+        self.samples.reserve_exact(width as usize * layout.channels as usize * height as usize);
+        Ok(())
     }
 
     fn row(&mut self, canon: &[u16]) -> Result<(), ViewStop> {

@@ -620,13 +620,8 @@ fn view(input: &Input<'_>, temp: &File, a: &Args, out: &mut impl Write) -> Resul
     let write = |out: &mut dyn Write, v: &[u8]| out.write_all(v).map_err(|e| e.to_string());
     match res {
         Err(ViewStop::Cancelled) => Ok(0),
-        Err(stop) => {
-            let (kind, bytes, width, height) = match stop {
-                ViewStop::TooLarge(b) => ("too_large", b, 0, 0),
-                ViewStop::OverViewLimit { width, height } => ("over_view_limit", 0, width, height),
-                ViewStop::Cancelled => unreachable!("handled above"),
-            };
-            let h = ViewHeader { format, stop: kind.into(), bytes, width, height, ..ViewHeader::default() };
+        Err(ViewStop::OverViewLimit { width, height }) => {
+            let h = ViewHeader { format, stop: "over_view_limit".into(), width, height, ..ViewHeader::default() };
             let mut line = serde_json::to_vec(&h).map_err(|e| e.to_string())?;
             line.push(b'\n');
             write(out, &line)?;

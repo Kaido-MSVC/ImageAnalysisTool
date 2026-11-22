@@ -1,17 +1,16 @@
 //! GUI 檢視用的解碼：整張影像的正規樣本，不做任何轉換（16-bit 完整保留，顯示用的 8-bit 轉換在 GUI 裡做）。
 //!
-//! AVIF 在 iat-worker.exe 裡解碼（rav1d 的 unsafe 不進 GUI 程序，D-R02 第三次修訂）；其他格式都是
-//! 純 safe 的 Rust 解碼器，留在 GUI 程序裡，樣本不必再經過管線複製一次（評估見 D-R02）。
+//! 所有格式都在 iat-worker.exe 裡解碼，和分析一樣套用 `job_commit_mib` 的 Job 上限與 `deadline_s`：
+//! 不可信的檔案不在 GUI 程序裡解碼，解碼器配置失敗或卡住也不會讓 GUI 中止或停住（D-R22）。
+//! 樣本經 stdout 傳回，父程序先驗證標頭再配置（見 `worker::read_view_stdout`）。
 
 use std::fmt;
 use std::path::Path;
 use std::time::Duration;
 
-use crate::engine::{VecSink, ViewSamples, ViewStop, decode_view_samples};
-use crate::input::Input;
+use crate::engine::ViewSamples;
 use crate::paths::{full_path, is_directory, trim_dir};
 use crate::run::open_read_only;
-use crate::sniff::sniff_format;
 use crate::temp::RunTemp;
 use crate::worker::view_protocol::{ViewHeader, ViewTrailer};
 use crate::worker::{WorkerFiles, WorkerMode, WorkerSettings, describe_failure, read_view_stdout, run_worker};
@@ -97,7 +96,6 @@ pub fn decode_for_view(
     cancel: &CancelToken,
 ) -> Result<DecodedImage, ViewError> {
     let file = open_read_only(path).map_err(|e| ViewError::Open(win::error_text(e)))?;
-    let input = Input::new(&file).map_err(|e| ViewError::Open(win::error_text(win::os_code(&e))))?;
     let dir = trim_dir(temp_dir.map_or_else(std::env::temp_dir, full_path));
     if !is_directory(&dir) {
         return Err(ViewError::Temp("temporary directory is not available".into()));
@@ -106,17 +104,15 @@ pub fn decode_for_view(
     let run_id =
         crate::run::new_run_id().map_err(|st| ViewError::Temp(format!("NTSTATUS 0x{:08X}", st.cast_unsigned())))?;
     let mut temp = RunTemp::create(&dir, &run_id).map_err(|e| ViewError::Temp(e.to_string()))?;
-    let res = if sniff_format(input.head()) == "avif" {
-        view_in_worker(&file, &temp, free, limits, max_pixels, cancel)
-    } else {
-        let mut sink = VecSink::default();
-        decode_view_samples(&input, temp.files[0].as_ref(), free, limits, max_pixels, cancel, &mut sink)
-            .map_err(stop_error)
-            .map(|v| (v, sink.samples))
-    };
+    let res = view_in_worker(&file, &temp, free, limits, max_pixels, cancel);
     // 關閉即刪除；檢視用的暫存檔留下時只能交給下次執行的舊檔清理。
     temp.close();
     let (v, samples) = res?;
+    finish(v, samples)
+}
+
+/// 解碼結果整理成 [`DecodedImage`]：沒有版面是不支援或開不了，一列都沒有解出是解碼錯誤。
+fn finish(v: ViewSamples, samples: Vec<u16>) -> Result<DecodedImage, ViewError> {
     if v.layout.channels == 0 {
         return Err(if crate::engine::has_frontend(&v.format) {
             ViewError::Decode(v.error.unwrap_or_default())
@@ -137,14 +133,6 @@ pub fn decode_for_view(
         samples,
         error: v.error,
     })
-}
-
-fn stop_error(s: ViewStop) -> ViewError {
-    match s {
-        ViewStop::Cancelled => ViewError::Cancelled,
-        ViewStop::TooLarge(b) => ViewError::TooLarge(b),
-        ViewStop::OverViewLimit { width, height } => ViewError::OverViewLimit { width, height },
-    }
 }
 
 /// 在 worker 裡解碼（套用 `limits.job_commit_mib` 的 Job 上限），樣本經 stdout 傳回。
@@ -226,6 +214,34 @@ mod tests {
         assert!(matches!(check_rows(&h, &rows(2), 12), Err(ViewError::Decode(_))), "fewer samples than rows");
         assert!(matches!(check_rows(&h, &rows(3), 36), Err(ViewError::Decode(_))), "more rows than the height");
         assert!(matches!(check_rows(&h, &rows(u32::MAX), 0), Err(ViewError::Decode(_))));
+    }
+
+    use crate::engine::{VecSink, ViewStop, decode_view_samples};
+    use crate::input::Input;
+
+    /// 測試用：和正式的 `decode_for_view` 同樣的流程，但在本程序裡解碼（這個模組裡會遮住正式版本）。
+    /// 測試執行檔旁邊沒有 iat-worker.exe；這裡驗證的是各解碼器交出的樣本與 [`finish`] 的整理，
+    /// worker 的傳輸另由 `worker` 模組的協定測試與 `view_timing` 範例驗證。
+    fn decode_for_view(
+        path: &Path,
+        temp_dir: Option<&Path>,
+        limits: &Limits,
+        max_pixels: u64,
+        cancel: &CancelToken,
+    ) -> Result<DecodedImage, ViewError> {
+        let file = open_read_only(path).map_err(|e| ViewError::Open(win::error_text(e)))?;
+        let input = Input::new(&file).map_err(|e| ViewError::Open(win::error_text(win::os_code(&e))))?;
+        let dir = temp_dir.map_or_else(std::env::temp_dir, Path::to_path_buf);
+        let run_id = crate::run::new_run_id().expect("system RNG");
+        let mut temp = RunTemp::create(&dir, &run_id).expect("temporary files");
+        let mut sink = VecSink::default();
+        let res = decode_view_samples(&input, temp.files[0].as_ref(), u64::MAX, limits, max_pixels, cancel, &mut sink);
+        temp.close();
+        match res {
+            Ok(v) => finish(v, sink.samples),
+            Err(ViewStop::OverViewLimit { width, height }) => Err(ViewError::OverViewLimit { width, height }),
+            Err(ViewStop::Cancelled) => Err(ViewError::Cancelled),
+        }
     }
 
     fn fixture(name: &str) -> std::path::PathBuf {
