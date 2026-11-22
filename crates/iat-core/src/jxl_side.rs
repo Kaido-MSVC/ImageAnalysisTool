@@ -352,12 +352,10 @@ impl<'a> JxlImageDecoder<'a> {
                 Ok(Event::BasicInfo) => {
                     let extra = d.basic_info().map_or(0, |b| b.extra_channels.len());
                     #[expect(clippy::cast_possible_truncation, reason = "JXL 位元深度 ≤ 64（1 + 6 bits 編碼）")]
+                    let bit_depth = self.bits as u8;
                     let pf = JxlPixelFormat {
                         color_type,
-                        color_data_format: Some(JxlDataFormat::U16 {
-                            endianness: Endianness::native(),
-                            bit_depth: self.bits as u8,
-                        }),
+                        color_data_format: Some(JxlDataFormat::U16 { endianness: Endianness::native(), bit_depth }),
                         extra_channel_format: vec![None; extra],
                     };
                     if let Err(e) = d.set_pixel_format(pf) {
