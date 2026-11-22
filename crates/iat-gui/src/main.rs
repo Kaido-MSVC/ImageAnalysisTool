@@ -70,6 +70,20 @@ struct AppState {
     viewed: Option<Viewed>,
     /// 目前正在背景解碼的檢視（避免重複啟動）
     view_loading: Option<(PathBuf, Option<PathBuf>)>,
+    /// 正在背景解碼的檢視的取消權杖
+    view_cancel: Option<CancelToken>,
+    /// 每次啟動檢視解碼加 1；送回的結果世代不符就是過時的（同一組檔案也能分辨）
+    view_gen: u64,
+}
+
+impl AppState {
+    /// 取消進行中的檢視解碼（結果到了也會因 `view_loading` 不符而丟掉）。
+    fn cancel_view(&mut self) {
+        if let Some(c) = self.view_cancel.take() {
+            c.cancel();
+        }
+        self.view_loading = None;
+    }
 }
 
 thread_local! {
@@ -247,7 +261,11 @@ fn rerun_with_suggestion(ui: &AppWindow) {
 /// 在背景執行緒分析；`raised` 是以建議值重新分析時的上限（結果畫面註明）。
 fn run_request(ui: &AppWindow, req: RunRequest, raised: Option<u64>) {
     let cancel = CancelToken::new();
-    with_state(|s| s.cancel = Some(cancel.clone()));
+    with_state(|s| {
+        s.cancel = Some(cancel.clone());
+        // 換了分析，先前的檢視解碼已經過時
+        s.cancel_view();
+    });
     ui.set_stage(0);
     ui.set_progress(0.0);
     ui.set_cancelling(false);
@@ -307,11 +325,10 @@ struct ViewLoaded {
 /// 顯示用影像的上限（16K×16K）。超過時樣本、RGBA 緩衝與金字塔合計需要好幾 GiB，解碼前就停止。
 const MAX_VIEW_PIXELS: u64 = 1 << 28;
 
-fn load_view(req: &RunRequest) -> Result<ViewLoaded, iat_core::ViewError> {
-    let cancel = CancelToken::new();
-    let original = decode_for_view(&req.original, req.temp_dir.as_deref(), &req.limits, MAX_VIEW_PIXELS, &cancel)?;
+fn load_view(req: &RunRequest, cancel: &CancelToken) -> Result<ViewLoaded, iat_core::ViewError> {
+    let original = decode_for_view(&req.original, req.temp_dir.as_deref(), &req.limits, MAX_VIEW_PIXELS, cancel)?;
     let output = match &req.output {
-        Some(p) => Some(decode_for_view(p, req.temp_dir.as_deref(), &req.limits, MAX_VIEW_PIXELS, &cancel)?),
+        Some(p) => Some(decode_for_view(p, req.temp_dir.as_deref(), &req.limits, MAX_VIEW_PIXELS, cancel)?),
         None => None,
     };
     let diff = match &output {
@@ -329,21 +346,29 @@ fn enter_viewer(ui: &AppWindow) {
     if busy {
         return;
     }
-    with_state(|s| {
+    let cancel = CancelToken::new();
+    let generation = with_state(|s| {
+        s.cancel_view();
         s.viewed = None;
         s.view_loading = Some(key.clone());
+        s.view_cancel = Some(cancel.clone());
+        s.view_gen += 1;
+        s.view_gen
     });
     ui.set_view_state(view_state::LOADING);
     ui.set_probe_text(SharedString::new());
     let weak = ui.as_weak();
     std::thread::spawn(move || {
-        let res = load_view(&req);
+        let res = load_view(&req, &cancel);
         post(&weak, move |ui| {
-            // 期間又跑了另一次分析：丟掉過時的結果。
-            if with_state(|s| s.view_loading.as_ref() != Some(&key)) {
+            // 期間又跑了另一次分析或重新進入檢視：丟掉過時的結果。
+            if with_state(|s| s.view_gen != generation || s.view_loading.is_none()) {
                 return;
             }
-            with_state(|s| s.view_loading = None);
+            with_state(|s| {
+                s.view_loading = None;
+                s.view_cancel = None;
+            });
             match res {
                 Err(iat_core::ViewError::OverViewLimit { width, height }) => {
                     ui.set_view_state(view_state::ERROR);

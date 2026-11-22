@@ -5,6 +5,7 @@
 
 use std::fmt;
 use std::path::Path;
+use std::time::Duration;
 
 use crate::engine::{VecSink, ViewSamples, ViewStop, decode_view_samples};
 use crate::input::Input;
@@ -170,7 +171,8 @@ fn view_in_worker(
         &settings,
         WorkerFiles { original: file, output: None, temp: [ta, tb] },
         cancel,
-        None,
+        // 和分析相同的期限：卡住的解碼器不會讓檢視一直停在載入中
+        Some(Duration::from_secs(limits.deadline_s)),
         &NoProgress,
         |f| read_view_stdout(f, max_pixels),
     );

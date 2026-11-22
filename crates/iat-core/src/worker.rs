@@ -755,6 +755,7 @@ pub(crate) fn read_view_stdout(f: &mut impl Read, max_pixels: u64) -> ViewOutput
         }
         if tag[0] != 1 || o.samples.len() + row_len > total || r.read_exact(&mut row).is_err() {
             o.error = Some("view output is malformed".into());
+            drain(&mut r);
             return o;
         }
         o.samples.extend(row.as_chunks::<2>().0.iter().map(|&b| u16::from_le_bytes(b)));
@@ -766,6 +767,8 @@ pub(crate) fn read_view_stdout(f: &mut impl Read, max_pixels: u64) -> ViewOutput
         Ok(t) => o.trailer = Some(t),
         Err(e) => o.error = Some(format!("view trailer: {e}")),
     }
+    // 結尾之後不該再有資料；有的話也讀掉，worker 才能結束
+    drain(&mut r);
     o
 }
 
@@ -851,8 +854,11 @@ mod tests {
     fn rows_beyond_the_height_are_malformed() {
         // 標頭說 1 列，送來 2 列
         let rest = [1u8, 7, 0, 1, 8, 0];
-        let o = parse(&stream(r#"{"model":"gray","channels":1,"bits":8,"width":1,"height":1}"#, &rest));
+        let bytes = stream(r#"{"model":"gray","channels":1,"bits":8,"width":1,"height":1}"#, &rest);
+        let mut cur = io::Cursor::new(&bytes[..]);
+        let o = read_view_stdout(&mut cur, LIMIT);
         assert_eq!(o.error.as_deref(), Some("view output is malformed"));
         assert_eq!(o.samples, [7]);
+        assert_eq!(cur.position(), bytes.len() as u64, "the rest of the output is drained");
     }
 }
