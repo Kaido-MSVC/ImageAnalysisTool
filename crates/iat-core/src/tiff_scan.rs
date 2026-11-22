@@ -228,6 +228,8 @@ impl<'a, 'b> Reader<'a, 'b> {
 
     /// 讀 `len` bytes 成新的 Vec；長度無法表示或超出檔案時回傳 None。
     pub fn read_vec(&mut self, off: u64, len: u64) -> Option<Vec<u8>> {
+        // 先確認範圍，再配置記憶體
+        off.checked_add(len).filter(|&end| end <= self.size)?;
         let mut v = vec![0u8; usize::try_from(len).ok()?];
         self.bytes(off, &mut v).then_some(v)
     }
