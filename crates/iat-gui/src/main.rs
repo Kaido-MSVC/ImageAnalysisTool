@@ -283,7 +283,11 @@ fn rerun_with_suggestion(ui: &AppWindow) {
     else {
         return;
     };
-    req.limits.job_commit_mib = suggested;
+    // 建議值來自 worker 的報告：和命令列一樣經過範圍檢查（16..=1048576），不合格就不重跑
+    if let Err(e) = req.limits.set(&format!("job_commit_mib={suggested}")) {
+        eprintln!("iat-gui: suggested job_commit_mib rejected: {e}");
+        return;
+    }
     run_request(ui, req, Some(suggested));
 }
 

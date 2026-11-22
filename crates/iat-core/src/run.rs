@@ -346,7 +346,7 @@ fn merge_worker(req: &RunRequest, r: &mut Report, w: WorkerRun<(Vec<u8>, bool)>)
     let lim = &req.limits;
     r.metrics.time_ms.insert("worker_wall".into(), w.wall_ms);
     r.metrics.memory_bytes.insert("job_peak_commit".into(), Some(Count(w.peak_commit)));
-    r.metrics.memory_bytes.insert("job_commit_limit".into(), Some(Count(lim.job_commit_mib << 20)));
+    r.metrics.memory_bytes.insert("job_commit_limit".into(), Some(Count(lim.job_commit_bytes())));
     r.metrics.io_read_bytes = Some(Count(w.io_read));
     let all_not_checked = |r: &mut Report, reason: &str| {
         set_not_checked(&mut r.original, reason);

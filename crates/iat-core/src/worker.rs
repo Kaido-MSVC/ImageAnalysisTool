@@ -145,7 +145,7 @@ pub(crate) fn run_worker<T: Send>(
         return fail(run, "iat-worker.exe not found next to iat.exe".into());
     };
     // 先建 Job：沒有上限絕不執行解碼器
-    let job = match win::WorkerJob::new(settings.limits.job_commit_mib << 20) {
+    let job = match win::WorkerJob::new(settings.limits.job_commit_bytes()) {
         Ok(j) => j,
         Err(e) => return fail(run, format!("Job Object could not be configured: {}", win::error_text(e.code))),
     };

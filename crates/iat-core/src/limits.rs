@@ -96,17 +96,22 @@ impl Limits {
     }
 
     pub fn buffer_bytes(&self) -> u64 {
-        self.buffer_mib << 20
+        self.buffer_mib.saturating_mul(1 << 20)
     }
+    // 欄位是 pub，可能沒經過 set() 的範圍檢查：MiB 換算成 bytes 一律飽和，不會溢位繞回小數值。
     pub fn metadata_item_bytes(&self) -> u64 {
-        self.metadata_item_mib << 20
+        self.metadata_item_mib.saturating_mul(1 << 20)
     }
     pub fn metadata_file_bytes(&self) -> u64 {
-        self.metadata_file_mib << 20
+        self.metadata_file_mib.saturating_mul(1 << 20)
+    }
+    /// Job 與程序的 commit 上限（bytes）。
+    pub fn job_commit_bytes(&self) -> u64 {
+        self.job_commit_mib.saturating_mul(1 << 20)
     }
     /// Job commit 上限減去固定保留量（D10）。
     pub fn codec_cap_bytes(&self) -> u64 {
-        (self.job_commit_mib << 20).saturating_sub(CODEC_RESERVE)
+        self.job_commit_bytes().saturating_sub(CODEC_RESERVE)
     }
 
     pub fn settings(&self) -> LimitSettings {
@@ -149,5 +154,14 @@ mod tests {
         let l = Limits { job_commit_mib: 16, ..Limits::default() };
         assert_eq!(l.codec_cap_bytes(), 0);
         assert_eq!(Limits::default().codec_cap_bytes(), (1024 - 64) << 20);
+    }
+
+    #[test]
+    fn mib_to_bytes_saturates_for_unchecked_fields() {
+        // 欄位是 pub：繞過 set() 的極大值不能溢位繞回成很小的上限
+        let l = Limits { job_commit_mib: 1 << 50, buffer_mib: u64::MAX, ..Limits::default() };
+        assert_eq!(l.job_commit_bytes(), u64::MAX);
+        assert_eq!(l.buffer_bytes(), u64::MAX);
+        assert_eq!(l.codec_cap_bytes(), u64::MAX - CODEC_RESERVE);
     }
 }
