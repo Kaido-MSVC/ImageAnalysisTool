@@ -9,7 +9,7 @@ use std::ptr::{self, NonNull};
 use std::slice;
 
 use rav1d::include::dav1d::data::Dav1dData;
-use rav1d::include::dav1d::dav1d::{Dav1dContext, Dav1dSettings};
+use rav1d::include::dav1d::dav1d::{Dav1dContext, Dav1dLogger, Dav1dSettings};
 use rav1d::include::dav1d::headers::{
     DAV1D_PIXEL_LAYOUT_I400, DAV1D_PIXEL_LAYOUT_I420, DAV1D_PIXEL_LAYOUT_I422, DAV1D_PIXEL_LAYOUT_I444,
 };
@@ -48,10 +48,9 @@ impl Context {
         s.operating_point = 0;
         s.all_layers = 0;
         // No logger: rav1d's default writes to stderr, which the worker forwards as `worker_stderr`.
-        // SAFETY: `Dav1dLogger` is `#[repr(C)]` with an `Option<SendSyncNonNull<_>>` cookie and an
-        // `Option<extern "C" fn>` callback; all-zero bytes are `None` for both (null-pointer
-        // optimization), which rav1d reads as "logging disabled".
-        unsafe { ptr::write_bytes(ptr::addr_of_mut!(s.logger), 0, 1) };
+        // SAFETY: `Dav1dLogger::new` only requires a callback that is safe to call; with no callback
+        // (and no cookie) rav1d treats logging as disabled and never calls anything.
+        s.logger = unsafe { Dav1dLogger::new(None, None) };
         let mut ctx: Option<Dav1dContext> = None;
         // SAFETY: both pointers come from live, exclusive references; `dav1d_open` reads the
         // settings and writes the context (or `None` on failure).
