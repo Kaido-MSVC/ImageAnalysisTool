@@ -313,8 +313,11 @@ pub fn run_analysis(req: &RunRequest, cancel: &CancelToken, progress: &dyn Progr
         let wf = WorkerFiles { original: orig, output: out_file, temp: [ta, tb] };
         // rav1d 的 panic 與解碼器呼叫中的配置失敗（Job 上限）會讓 worker 直接結束：把那一側記下來
         // 重跑，rav1d 那一側判為解碼錯誤、配置失敗那一側照 C++ 版判為 resource_limit（每側各最多一次）。
+        // 期限同 C++ 版：從（第一次）啟動 worker 起算一次，重跑共用剩下的時間（D-R22）。
+        let t_worker = Instant::now();
         let w = loop {
-            let w = run_worker(&settings, wf, cancel, Some(deadline), progress, read_report_stdout);
+            let left = deadline.saturating_sub(t_worker.elapsed());
+            let w = run_worker(&settings, wf, cancel, Some(left), progress, read_report_stdout);
             if w.outcome != WorkerOutcome::Exited {
                 break w;
             }
