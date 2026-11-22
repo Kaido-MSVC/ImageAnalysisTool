@@ -96,7 +96,14 @@ impl<'a> WebpDecoder<'a> {
         };
         rgba.resize(n, 0);
         drop(tool_buffers);
-        let res = image_webp::WebPDecoder::new(Cursor::new(vp8l_decoder_input(payload))).and_then(|mut d| {
+        let input = match vp8l_decoder_input(payload) {
+            Ok(input) => input,
+            Err(e) => {
+                self.fail_decode(s, issues, "decode_error", e.to_string());
+                return None;
+            }
+        };
+        let res = image_webp::WebPDecoder::new(Cursor::new(input)).and_then(|mut d| {
             if d.dimensions() != (self.width, self.height) || !d.has_alpha() {
                 return Err(image_webp::DecodingError::InconsistentImageSizes);
             }

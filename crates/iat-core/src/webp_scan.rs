@@ -403,22 +403,48 @@ fn scan_into(s: &mut WebpScan, rd: &mut Reader<'_, '_>, file_size: u64, lim: &Li
 /// 唯一的修改是把 VP8L 標頭的 alpha_is_used 位元設為 1。image-webp 解碼位元串流時不使用這個位元，
 /// 只拿它決定要不要丟掉 alpha；設為 1 才能一律拿到完整的 RGBA（D-R15）。內容不到 5 bytes
 /// （放不下標頭）時照原樣包裝，由解碼器回報錯誤。
-#[expect(clippy::cast_possible_truncation, reason = "payload 是 RIFF 內的 chunk：12 + 長度 + 補齊 ≤ RIFF 大小（u32）")]
-pub fn vp8l_decoder_input(mut payload: Vec<u8>) -> Vec<u8> {
+///
+/// # Errors
+///
+/// 內容放不進 RIFF 的 32 位元大小欄位時回傳 [`Vp8lTooLarge`]，不截斷大小欄位。
+pub fn vp8l_decoder_input(mut payload: Vec<u8>) -> Result<Vec<u8>, Vp8lTooLarge> {
+    let (riff_size, chunk_size) = riff_sizes(payload.len())?;
     if payload.len() >= 5 {
         payload[4] |= 0x10;
     }
     let pad = payload.len() & 1;
     let mut out = Vec::with_capacity(20 + payload.len() + pad);
     out.extend_from_slice(b"RIFF");
-    out.extend_from_slice(&((4 + 8 + payload.len() + pad) as u32).to_le_bytes());
+    out.extend_from_slice(&riff_size.to_le_bytes());
     out.extend_from_slice(b"WEBPVP8L");
-    out.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+    out.extend_from_slice(&chunk_size.to_le_bytes());
     out.extend_from_slice(&payload);
     if pad == 1 {
         out.push(0);
     }
-    out
+    Ok(out)
+}
+
+/// VP8L 內容放不進 RIFF 的 32 位元大小欄位。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Vp8lTooLarge {
+    /// VP8L chunk 內容的位元組數
+    pub bytes: usize,
+}
+
+impl std::fmt::Display for Vp8lTooLarge {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "VP8L payload of {} bytes does not fit in a RIFF size field", self.bytes)
+    }
+}
+
+impl std::error::Error for Vp8lTooLarge {}
+
+/// RIFF 大小（"WEBP" + chunk 標頭 + 內容 + 補齊）與 chunk 大小。
+fn riff_sizes(len: usize) -> Result<(u32, u32), Vp8lTooLarge> {
+    let err = Vp8lTooLarge { bytes: len };
+    let riff = len.checked_add(4 + 8 + (len & 1)).ok_or(err)?;
+    Ok((u32::try_from(riff).map_err(|_| err)?, u32::try_from(len).map_err(|_| err)?))
 }
 
 #[cfg(test)]
@@ -429,7 +455,7 @@ mod tests {
     fn decoder_input_keeps_payload_and_sets_only_the_hint_bit() {
         // 偶數長度：RIFF 大小 = 4 + 8 + 內容
         let p = vec![0x2F, 0, 0, 0, 0x00, 0xAA];
-        let w = vp8l_decoder_input(p.clone());
+        let w = vp8l_decoder_input(p.clone()).expect("small payload");
         assert_eq!(&w[..4], b"RIFF");
         assert_eq!(le32(&w[4..]) as usize, 4 + 8 + p.len());
         assert_eq!(w.len(), 8 + le32(&w[4..]) as usize);
@@ -444,7 +470,7 @@ mod tests {
     #[test]
     fn decoder_input_pads_odd_length() {
         let p = vec![0x2F, 1, 2, 3, 0x10, 5, 6];
-        let w = vp8l_decoder_input(p.clone());
+        let w = vp8l_decoder_input(p.clone()).expect("small payload");
         assert_eq!(le32(&w[16..]) as usize, 7, "chunk size stays odd (real length)");
         assert_eq!(le32(&w[4..]) as usize, 4 + 8 + 7 + 1, "RIFF size includes the padding byte");
         assert_eq!(w.len(), 20 + 7 + 1);
@@ -470,16 +496,28 @@ mod tests {
         }
         assert!(payload.len() > 20, "fixture has a VP8L chunk");
         let decode = |p: Vec<u8>| -> Result<(), image_webp::DecodingError> {
-            let mut d = image_webp::WebPDecoder::new(std::io::Cursor::new(vp8l_decoder_input(p)))?;
+            let input = vp8l_decoder_input(p).expect("small payload");
+            let mut d = image_webp::WebPDecoder::new(std::io::Cursor::new(input))?;
             let mut buf = vec![0; d.output_buffer_size().expect("small image")];
             d.read_image(&mut buf)
         };
         assert!(decode(payload.clone()).is_ok(), "the whole chunk decodes");
         let half = payload[..payload.len() / 2].to_vec();
-        let w = vp8l_decoder_input(half.clone());
+        let w = vp8l_decoder_input(half.clone()).expect("small payload");
         assert_eq!(le32(&w[16..]) as usize, half.len(), "the cut length is passed on unchanged");
         assert!(decode(half).is_err(), "a cut bitstream is an error, never padded into an image");
         // 放不下標頭的內容照原樣包裝，由解碼器回報錯誤
         assert!(decode(vec![0x2F, 0, 0]).is_err());
+    }
+
+    #[test]
+    fn riff_sizes_reject_payloads_that_do_not_fit() {
+        // 偶數長度：12 + len ≤ u32::MAX；u32::MAX - 12 是奇數，最大的偶數再少 1
+        let max_even = (u32::MAX - 13) as usize;
+        assert_eq!(riff_sizes(max_even), Ok((u32::MAX - 1, u32::MAX - 13)));
+        // 奇數長度要多算 1 byte 補齊：比 max_even 小 1 可以，大 1 就放不下
+        assert_eq!(riff_sizes(max_even - 1), Ok((u32::MAX - 1, u32::MAX - 14)));
+        assert_eq!(riff_sizes(max_even + 1), Err(Vp8lTooLarge { bytes: max_even + 1 }));
+        assert_eq!(riff_sizes(usize::MAX), Err(Vp8lTooLarge { bytes: usize::MAX }));
     }
 }
