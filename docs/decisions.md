@@ -50,7 +50,26 @@ C++ 版把解碼放在 `iat-worker.exe`，用 Job Object 套 `job_commit_mib` �
 - 報告經過一次 JSON 往返：serde_json 開 `float_roundtrip`，浮點數原值往返。`metrics` 現在有 `worker_wall`、`job_peak_commit`、`job_commit_limit`（仍不比對，D-R08）。
 - **GUI 的檢視解碼**：AVIF 在 worker 裡解碼（套 GUI 的 `job_commit_mib`），樣本經 stdout 傳回；其他格式留在 GUI 程序裡。評估：其他格式的解碼器都是純 safe 的 Rust，沒有 rav1d 那樣的 unsafe 隔離需求；檢視不產生報告，沒有和 C++ 版一致的要求；改走 worker 會讓整張樣本多經過一次管線複製（16K×8K RGB16 約 800 MB）。
 - **JXL 也走 worker 的評估**（D-R18）：已隨「所有格式」一起走 worker，Job 的 commit 上限因此對 JXL 生效，不會再無上限地配置。但和 C++ 版仍不完全相同：C++ 版的 libjxl 經自己的配置器，超過硬上限（`job_commit_mib` − 64 MiB）時那一側判為 `resource_limit`、報告其餘部分照常產生；Rust 版是整個 worker 在 Job 上限配置失敗，報告為執行層級的 `resource_limit`（退出碼 4 相同，`decode_status` 都是 `not_checked`／`resource_limit`，但沒有各側的其他欄位）。事前預估擋下的情況（大多數）和 C++ 版完全相同。
-- **已知差異**：C++ 版的 libpng 也有同樣的配置器上限。C++ `run_e2e.py` 的 `job_commit_limit`（`s1_wide_rgb16_srgb.png` 自己比自己、`buffer_mib=512 job_commit_mib=24`）：C++ 版是兩側各一個 `libpng: Out of memory`，報告完整；Rust 版是執行層級的 `worker allocation failed under Job commit limit 24 MiB (Job memory-limit notification received)`。退出碼 4、兩側 `not_checked`／`resource_limit` 相同。這個案例不放進比對腳本（差異是整份報告的內容，不是個別欄位）。
+- ~~**已知差異**：C++ 版的 libpng 也有同樣的配置器上限。C++ `run_e2e.py` 的 `job_commit_limit`（`s1_wide_rgb16_srgb.png` 自己比自己、`buffer_mib=512 job_commit_mib=24`）：C++ 版是兩側各一個 `libpng: Out of memory`，報告完整；Rust 版是執行層級的 `worker allocation failed under Job commit limit 24 MiB (Job memory-limit notification received)`。退出碼 4、兩側 `not_checked`／`resource_limit` 相同。這個案例不放進比對腳本（差異是整份報告的內容，不是個別欄位）。~~ 已由第四次修訂處理。
+
+**第四次修訂（2026-11-22，階段 7，使用者指示）**：Job 上限造成的配置失敗改成和 C++ 版相同的報告形式，沿用 rav1d panic 的機制。
+- worker 在解碼器的 `open`／`read_row`／`finish` 期間（以及 `open` 之後配置該側的工具列緩衝時）把這一側登記到 `win::ALLOC_SIDE`。配置器失敗時，先把「哪一側、哪個階段」以 17 bytes 的通道紀錄（種類 3）直接用 WriteFile 寫出，再照舊寫固定字串並 `ExitProcess(3)`；整個過程不配置記憶體。
+- 父程序收到後，把那一側標記成 `--alloc-failed <side>:<stage>` 重跑 worker（每側最多一次，和 rav1d 的 panic 共用重跑迴圈）。重跑時那一側不解碼，照 C++ 1.0.0 該格式的形式判為 `not_checked`／`resource_limit`，報告其餘部分照常產生。
+- 各格式的形式（`engine::job_limit_failure`）：
+  - PNG：`libpng: Out of memory`，`decoder_errors` 加 `Out of memory`。
+  - WebP 工具緩衝階段（檔案與 RGBA 緩衝）：`buffers for the WebP file and its RGBA output could not be allocated`。
+  - WebP 解碼階段：`libwebp ran out of memory (OUT_OF_MEMORY)`，`decoder_errors` 加 `libwebp: OUT_OF_MEMORY`。
+  - JXL：`libjxl allocation refused at the hard cap of N bytes (…)`。
+  - AVIF：`libavif: Out of memory`（`decoder_errors` 同）。
+  - PSD／PSB：`PSD row buffers could not be allocated`。
+  - TIFF：C++ 版沒有攔下 libtiff 以外的配置失敗（worker 的 `bad_alloc`），維持執行層級的 `resource_limit`，同 C++ 版。
+  - 在解碼器呼叫以外（掃描、比較、報告）配置失敗時，同 C++ 版 worker 的 `bad_alloc`，維持執行層級。
+- **驗證**：比對腳本新增 `job_commit_limit`（C++ `run_e2e.py` 的同名案例），和 C++ 版一致，只有允許的 `decode_path`。另外用 C++ 建置的 `gen_codec_fixture.exe` 產生 4096×4096 RGB16 JXL 與 8192×8192 RGBA8 WebP（`--big`，不進 git），`job_commit_mib=72`、預估縮成 1% 時 JXL、WebP 與 WebP 對 JXL 三個案例和 C++ 版一致（WebP 是工具緩衝階段）。
+- **做不到完全一致的部分**：
+  - **失敗與否取決於各自的記憶體用量**。Rust 版的解碼器用量和 C++ 版不同，同一個上限下可能一邊失敗、一邊完成。C++ `run_e2e.py` 的 `jxlbig_allocator`（`job_commit_mib=128`、預估 10%）與 `webpbig_job_limit`（`job_commit_mib=384`、預估 50%）：C++ 版判為 `resource_limit`（退出碼 4），Rust 版在上限內解碼完成（退出碼 0）。這兩個案例列為允許差異（`big_jxl_allocator_cap`、`big_webp_job_limit`）。
+  - **失敗點不同**：C++ 版的 libpng、libjxl 是被自己的配置器以 `job_commit_mib` − 64 MiB 拒絕，Rust 版是整個 worker 碰到 `job_commit_mib`。PNG 在 `read_row` 中途失敗時，C++ 版可能已解出部分列，Rust 版重跑時那一側一律從 0 列判為 `resource_limit`（`rows_decoded` 可能不同，判定相同）。
+  - **WebP 解碼階段的訊息實際上不會出現**：image-webp 直接解進 RGBA 緩衝，幾乎不另外配置，失敗都落在工具緩衝階段。C++ 版在 libwebp 內失敗的上限下，Rust 版通常會解碼完成（上一項）。
+  - 重跑多花一次 worker 啟動與掃描的時間（只在配置失敗時）。
 
 ### D-R03 iat-core 的第二個 unsafe 例外：`win` 模組（2026-11-19）
 
@@ -502,3 +521,11 @@ C++ 版的訊息 `image resource 0x<id> name runs past the resource section` 在
 | jxlgen_lossy_noxyb_vs_png | samples.per_channel[*].mae | 非 XYB 的有損 JXL：有損解碼的結果依解碼器而異，libjxl 與 jxl-rs 都是合規的解碼器，樣本有少量最低位元差異；不同的像素數、最大誤差、strict 判定與問題代碼仍要求一致。IMB-C 的 JXL 輸出一律無損，不受影響（D-R18） |
 | jxlgen_lossy_noxyb_vs_png | samples.per_channel[*].rmse | 同上 |
 | jxlgen_lossy_noxyb_vs_png | samples.first_differences[*].output[*] | 同上（只限列出的差異樣本的輸出值） |
+| big_jxl_allocator_cap | * | 記憶體用量不同：C++ 版的 libjxl 在 64 MiB 硬上限被拒（`resource_limit`，退出碼 4），jxl-rs 在 128 MiB 的 Job 內解碼完成（退出碼 0）；只在 `--big` 時執行（D-R02 第四次修訂） |
+| big_jxl_allocator_cap | exit | 同上 |
+| big_jxl_allocator_cap | stderr | 同上 |
+| big_jxl_allocator_cap | markdown | 同上 |
+| big_webp_job_limit | * | 記憶體用量不同：C++ 版的 libwebp 在 384 MiB 的 Job 內配置失敗（`resource_limit`），image-webp 不另外配置大緩衝、解碼完成；只在 `--big` 時執行（D-R02 第四次修訂） |
+| big_webp_job_limit | exit | 同上 |
+| big_webp_job_limit | stderr | 同上 |
+| big_webp_job_limit | markdown | 同上 |
