@@ -13,7 +13,7 @@ use std::fs::File;
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use windows_sys::Win32::Foundation::{
@@ -549,21 +549,51 @@ const ALLOC_FAILED_JSON: &[u8] = br#"{"worker_error":"resource_limit","message":
 /// 配置失敗時的結束代碼（同 C++ 版 worker 的 bad_alloc）。
 pub const ALLOC_FAILED_EXIT: u32 = 3;
 
-/// 把固定字串直接寫到 stdout 後結束程序；不配置記憶體、不跑解構與 atexit。
-fn allocation_failed() -> ! {
-    // SAFETY: 取得本程序的標準輸出 handle。
-    let out = unsafe { GetStdHandle(STD_OUTPUT_HANDLE) };
+/// 正在解碼的一側（0：沒有或該格式在 C++ 版是執行層級；1：original；2：output）。
+/// 配置失敗時據此告訴父程序是哪一側（D-R02 第四次修訂）。
+pub(crate) static ALLOC_SIDE: AtomicU8 = AtomicU8::new(0);
+/// 這一側正在做的配置屬於哪個階段（`engine::AllocStage` 的值），隨出事的一側一起送出。
+pub(crate) static ALLOC_STAGE: AtomicU8 = AtomicU8::new(0);
+/// 通道的 handle 值（0：沒有）。
+static ALLOC_CHANNEL: AtomicUsize = AtomicUsize::new(0);
+/// 通道紀錄的種類：配置失敗的一側（格式同 `worker` 的通道紀錄，17 bytes）。
+pub(crate) const REC_ALLOC_FAILED: u8 = 3;
+
+/// worker 端：登記通道，配置失敗時把出事的一側寫進去。`channel` 必須存活到程序結束
+/// （worker 把它放在 static 裡，從不關閉）；handle 已關閉時寫入只會失敗，不會有其他影響。
+pub fn set_alloc_failure_channel(channel: &File) {
+    ALLOC_CHANNEL.store(channel.as_raw_handle() as usize, Ordering::SeqCst);
+}
+
+/// 寫完整段靜態資料（失敗就放棄）；不配置記憶體。
+fn write_all_raw(h: HANDLE, data: &[u8]) {
     let mut done = 0usize;
-    while done < ALLOC_FAILED_JSON.len() {
+    while done < data.len() {
         let mut n = 0u32;
-        let rest = &ALLOC_FAILED_JSON[done..];
-        // SAFETY: rest 是靜態資料；n 指向本地變數；不使用 overlapped。
-        let ok = unsafe { WriteFile(out, rest.as_ptr(), rest.len() as u32, &mut n, std::ptr::null_mut()) };
+        let rest = &data[done..];
+        // SAFETY: rest 指向有效的資料；n 指向本地變數；不使用 overlapped。h 無效時 WriteFile 只回傳失敗。
+        let ok = unsafe { WriteFile(h, rest.as_ptr(), rest.len() as u32, &mut n, std::ptr::null_mut()) };
         if ok == 0 || n == 0 {
             break;
         }
         done += n as usize;
     }
+}
+
+/// 把出事的一側寫到通道、固定字串寫到 stdout 後結束程序；不配置記憶體、不跑解構與 atexit。
+fn allocation_failed() -> ! {
+    let side = ALLOC_SIDE.load(Ordering::SeqCst);
+    let chan = ALLOC_CHANNEL.load(Ordering::SeqCst);
+    if side != 0 && chan != 0 {
+        let mut rec = [0u8; 17];
+        rec[0] = REC_ALLOC_FAILED;
+        rec[1] = side - 1;
+        rec[9] = ALLOC_STAGE.load(Ordering::SeqCst);
+        write_all_raw(chan as HANDLE, &rec);
+    }
+    // SAFETY: 取得本程序的標準輸出 handle。
+    let out = unsafe { GetStdHandle(STD_OUTPUT_HANDLE) };
+    write_all_raw(out, ALLOC_FAILED_JSON);
     // SAFETY: 直接結束本程序；不回到 Rust 程式碼。
     unsafe { ExitProcess(ALLOC_FAILED_EXIT) }
 }

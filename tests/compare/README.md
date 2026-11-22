@@ -21,5 +21,6 @@ py -3.13 -I tests\compare\compare_iat.py `
 - 允許差異表的欄位若寫成 `issues[code=X]`，比對前只略過 C++ 版中代碼為 X 的問題（JSON 與 Markdown 的那一列），其他問題照常逐項比對；用於 Rust 版暫時無法產生的問題（D-R18 的 `layered_image`）。
 - 已允許的數值差異（例如有損解碼的 mae／rmse）也會換回 Markdown，浮點數用 6 位有效數字（同 C++ 版的輸出）。
 - 本機私人樣本：`--local <cases.local.json>`（C++ repo `tools/regress` 的格式，讀 `cases[]` 與 `inspect_all`）、`--pairs <資料夾>`（`gen_pairs.py` 的輸出，加入 `run_cases.py` 的對照組案例）。案例名稱前加 `local_`；樣本唯讀，結果只寫到 `--out`，都不進 git。例如 `--local D:\projects\ImageAnalysisTool\tools\regress\cases.local.json --pairs <pairs> --only ^local_`。
+- Job 上限（階段 7，D-R02 第四次修訂）：`job_commit_limit` 是 C++ 版 `run_e2e.py` 的同名案例。`--big <資料夾>` 另外加入 `big_*` 五個案例，資料夾裡要有 `big.jxl`（4096×4096 RGB16）與 `big.webp`（8192×8192 RGBA8），用 C++ 建置的 `build\release\bin\gen_codec_fixture.exe jxl|webp <raw> <輸出> <寬> <高> <聲道> [位元]` 產生（raw 為交錯的小端序樣本，內容不影響結果）；檔案不進 git。
 - `--only <regex>` 只跑名稱符合的案例；`--no-cancel` 跳過需要 16 GiB 稀疏檔的取消案例。
 - 用到硬連結，`--out` 建議放在 NTFS 磁碟上。

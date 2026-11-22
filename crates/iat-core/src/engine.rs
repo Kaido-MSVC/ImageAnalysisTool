@@ -42,6 +42,49 @@ pub struct AnalysisInput<'a> {
     pub deadline: Instant,
     /// 已知 rav1d 會 panic 的一側（[original, output]）：不再解碼，判為解碼錯誤（見 `worker`）
     pub av1_failed: [bool; 2],
+    /// 先前的 worker 在這一側解碼時配置失敗（Job 的 commit 上限）與失敗的階段：不再解碼，照 C++ 版
+    /// 該格式解碼器的形式判為 `resource_limit`（見 [`job_limit_failure`]）
+    pub alloc_failed: [Option<AllocStage>; 2],
+}
+
+/// 配置失敗發生在解碼的哪個階段；決定照 C++ 版哪一種訊息回報（D-R02 第四次修訂）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AllocStage {
+    /// 解碼器本身（C++ 版的 libpng／libwebp／libjxl／libavif 配置失敗）
+    Decoder = 0,
+    /// 解碼前配置的工具緩衝（C++ 版 WebP 的檔案與 RGBA 緩衝）
+    ToolBuffers = 1,
+}
+
+impl AllocStage {
+    /// 通道紀錄與命令列用的數值。
+    pub(crate) fn from_code(v: u64) -> Option<Self> {
+        match v {
+            0 => Some(Self::Decoder),
+            1 => Some(Self::ToolBuffers),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn code(self) -> u8 {
+        self as u8
+    }
+}
+
+/// 解碼器在這段期間的配置屬於 [`AllocStage::ToolBuffers`]；離開時（含 unwind）回到解碼器階段。
+pub(crate) struct ToolBufferStage;
+
+impl ToolBufferStage {
+    pub(crate) fn enter() -> Self {
+        crate::win::ALLOC_STAGE.store(AllocStage::ToolBuffers.code(), std::sync::atomic::Ordering::SeqCst);
+        Self
+    }
+}
+
+impl Drop for ToolBufferStage {
+    fn drop(&mut self) {
+        crate::win::ALLOC_STAGE.store(AllocStage::Decoder.code(), std::sync::atomic::Ordering::SeqCst);
+    }
 }
 
 /// 引擎的結果：被取消或超過期限時，外層照 C++ 版處理 worker 被終止的情況。
@@ -261,6 +304,8 @@ pub fn suggest_limit_mib(needed: u64, reserve: u64, step_mib: u64, max_mib: u64)
 
 struct Side<'a> {
     st: SideState<'a>,
+    /// 先前的 worker 在這一側配置失敗（見 [`AnalysisInput::alloc_failed`]）
+    alloc_failed: Option<AllocStage>,
     /// 仍可解碼的解碼器；格式不支援或已停用時為 None
     dec: Option<Box<dyn Decoder<'a> + 'a>>,
     /// 被預算或 open() 擋下的解碼器，只留著做記憶體統計
@@ -287,9 +332,11 @@ impl Side<'_> {
     }
 
     /// 以下三個呼叫都用 catch_unwind 包住：解碼器裡的 panic 不讓整個 worker 結束。
+    /// 呼叫期間標記這一側，worker 配置失敗時父程序才知道是哪一側（[`AllocSideGuard`]）。
     fn open(&mut self, issues: &mut Vec<Issue>, lim: &Limits) -> bool {
         let Some(dec) = self.dec.as_mut() else { return false };
         let st = &mut self.st;
+        let _side = AllocSideGuard::new(st);
         match panic::catch_unwind(AssertUnwindSafe(|| dec.open(st, issues, lim))) {
             Ok(ok) => ok,
             Err(_) => {
@@ -302,6 +349,7 @@ impl Side<'_> {
     fn read_row(&mut self, issues: &mut Vec<Issue>) -> bool {
         let Some(dec) = self.dec.as_mut() else { return false };
         let st = &mut self.st;
+        let _side = AllocSideGuard::new(st);
         match panic::catch_unwind(AssertUnwindSafe(|| dec.read_row(st, issues))) {
             Ok(ok) => ok,
             Err(_) => {
@@ -314,9 +362,82 @@ impl Side<'_> {
     fn finish(&mut self, issues: &mut Vec<Issue>) {
         let Some(dec) = self.dec.as_mut() else { return };
         let st = &mut self.st;
+        let _side = AllocSideGuard::new(st);
         if panic::catch_unwind(AssertUnwindSafe(|| dec.finish(st, issues))).is_err() {
             self.panicked(issues);
         }
+    }
+}
+
+/// C++ 版解碼器在配置失敗時的回報（只有在 C++ 版是「那一側 `resource_limit`、報告其餘照常」的格式）。
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct JobLimitFailure {
+    /// `resource_limit` 問題的訊息
+    pub message: String,
+    /// 寫進 `decoder_errors` 的一筆（C++ 版有寫的格式）
+    pub decoder_error: Option<String>,
+}
+
+/// C++ 1.0.0 在這個格式的解碼器配置失敗時，是否只把那一側判為 `resource_limit`。
+fn side_level_alloc_failure(format: &str) -> bool {
+    matches!(format, "png" | "webp" | "jxl_codestream" | "jxl_container" | "avif" | "psd" | "psb")
+}
+
+/// 這個格式在 C++ 1.0.0 配置失敗時的形式（D-R02 第四次修訂）。TIFF 等 C++ 版沒有攔下配置失敗的
+/// 格式回傳 None：worker 不標記那一側，維持執行層級的 `resource_limit`（同 C++ 版 worker 的 bad_alloc）。
+pub(crate) fn job_limit_failure(format: &str, stage: AllocStage, lim: &Limits) -> Option<JobLimitFailure> {
+    if !side_level_alloc_failure(format) {
+        return None;
+    }
+    let (message, decoder_error) = match (format, stage) {
+        // C++ 版先配置整個檔案與 RGBA 輸出（webp_side.cpp），再交給 libwebp
+        ("webp", AllocStage::ToolBuffers) => {
+            ("buffers for the WebP file and its RGBA output could not be allocated".to_string(), None)
+        }
+        _ => return decoder_failure(format, lim),
+    };
+    Some(JobLimitFailure { message, decoder_error })
+}
+
+/// 解碼器本身配置失敗時 C++ 1.0.0 的形式。
+fn decoder_failure(format: &str, lim: &Limits) -> Option<JobLimitFailure> {
+    let (message, decoder_error) = match format {
+        // libpng 的配置器（png_shim）拒絕：`pngs_read_info` 失敗
+        "png" => ("libpng: Out of memory".to_string(), Some("Out of memory".to_string())),
+        "webp" => ("libwebp ran out of memory (OUT_OF_MEMORY)".into(), Some("libwebp: OUT_OF_MEMORY".into())),
+        "jxl_codestream" | "jxl_container" => (
+            format!(
+                "libjxl allocation refused at the hard cap of {} bytes (job_commit_mib - 64 MiB; raise with --limits job_commit_mib=)",
+                lim.codec_cap_bytes()
+            ),
+            None,
+        ),
+        "avif" => ("libavif: Out of memory".into(), Some("libavif: Out of memory".into())),
+        "psd" | "psb" => ("PSD row buffers could not be allocated".into(), None),
+        _ => return None,
+    };
+    Some(JobLimitFailure { message, decoder_error })
+}
+
+/// 解碼器呼叫期間把這一側登記給 worker 的配置器（見 `win::ALLOC_SIDE`）；只登記
+/// [`job_limit_failure`] 有對應形式的格式。離開時（含 unwind）清除。
+struct AllocSideGuard;
+
+impl AllocSideGuard {
+    fn new(st: &SideState<'_>) -> Self {
+        let v = match (side_level_alloc_failure(&st.rep.format), st.scope) {
+            (false, _) => 0,
+            (true, "output") => 2,
+            (true, _) => 1,
+        };
+        crate::win::ALLOC_SIDE.store(v, std::sync::atomic::Ordering::SeqCst);
+        Self
+    }
+}
+
+impl Drop for AllocSideGuard {
+    fn drop(&mut self) {
+        crate::win::ALLOC_SIDE.store(0, std::sync::atomic::Ordering::SeqCst);
     }
 }
 
@@ -344,6 +465,7 @@ fn new_side<'a>(
         },
         dec: None,
         stopped: None,
+        alloc_failed: None,
     }
 }
 
@@ -418,9 +540,11 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Outcome {
     let mut issues: Vec<Issue> = Vec::new();
     let mut a = new_side("original", input.original, input.temp[0], &quota);
     a.st.av1_failed = input.av1_failed[0];
+    a.alloc_failed = input.alloc_failed[0];
     let mut b = input.output.map(|i| {
         let mut s = new_side("output", i, input.temp[1], &quota);
         s.st.av1_failed = input.av1_failed[1];
+        s.alloc_failed = input.alloc_failed[1];
         s
     });
     prepare_side(&mut a, &mut issues, lim);
@@ -536,7 +660,21 @@ pub fn analyze(input: &AnalysisInput<'_>) -> Outcome {
         if s.dec.is_none() {
             continue;
         }
+        if let Some(stage) = s.alloc_failed
+            && let Some(f) = job_limit_failure(&s.st.rep.format, stage, lim)
+        {
+            s.stop();
+            let st = &mut s.st;
+            st.failed = true;
+            st.rep.decode_status = "not_checked".into();
+            st.rep.decode_status_reason = "resource_limit".into();
+            st.rep.decoder_errors.extend(f.decoder_error);
+            issues.push(Issue::new(code::RESOURCE_LIMIT, "error", st.scope, f.message));
+            continue;
+        }
         if s.open(&mut issues, lim) {
+            // 這一側的列緩衝：配置失敗也算這一側（C++ 版在解碼器配置之後才配置工具的列緩衝）
+            let _side = AllocSideGuard::new(&s.st);
             s.st.canon = vec![0; s.st.width as usize * s.st.layout.channels as usize];
         } else {
             s.stop();
@@ -1235,5 +1373,30 @@ mod tests {
         assert_eq!(suggest_limit_mib(17 << 20, 0, 16, 1 << 16), Some(32));
         assert_eq!(suggest_limit_mib(u64::MAX, 1, 16, 1 << 16), None);
         assert_eq!(suggest_limit_mib(1 << 40, 0, 16, 1 << 16), None);
+    }
+
+    #[test]
+    fn job_limit_failure_follows_cpp_form() {
+        let lim = Limits::default();
+        let png = job_limit_failure("png", AllocStage::Decoder, &lim).expect("png is side level");
+        assert_eq!(png.message, "libpng: Out of memory");
+        assert_eq!(png.decoder_error.as_deref(), Some("Out of memory"));
+        let webp_tool = job_limit_failure("webp", AllocStage::ToolBuffers, &lim).expect("webp is side level");
+        assert!(webp_tool.message.starts_with("buffers for the WebP file"), "{}", webp_tool.message);
+        assert_eq!(webp_tool.decoder_error, None);
+        let webp_dec = job_limit_failure("webp", AllocStage::Decoder, &lim).expect("webp is side level");
+        assert_eq!(webp_dec.decoder_error.as_deref(), Some("libwebp: OUT_OF_MEMORY"));
+        let jxl = job_limit_failure("jxl_container", AllocStage::Decoder, &lim).expect("jxl is side level");
+        assert!(jxl.message.contains(&lim.codec_cap_bytes().to_string()), "{}", jxl.message);
+        // C++ 版的 TIFF 沒有攔下配置失敗：維持執行層級
+        assert_eq!(job_limit_failure("tiff", AllocStage::Decoder, &lim), None);
+    }
+
+    #[test]
+    fn alloc_stage_codes_round_trip() {
+        for s in [AllocStage::Decoder, AllocStage::ToolBuffers] {
+            assert_eq!(AllocStage::from_code(u64::from(s.code())), Some(s));
+        }
+        assert_eq!(AllocStage::from_code(2), None);
     }
 }

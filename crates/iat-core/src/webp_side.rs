@@ -9,7 +9,7 @@
 use std::collections::BTreeMap;
 use std::io::Cursor;
 
-use crate::engine::{Decoder, RowLayout, SideState, temp_failure};
+use crate::engine::{Decoder, RowLayout, SideState, ToolBufferStage, temp_failure};
 use crate::input::Input;
 use crate::limits::Limits;
 use crate::png_scan::exif_orientation;
@@ -75,6 +75,8 @@ impl<'a> WebpDecoder<'a> {
     /// 解出整張 RGBA；失敗時已記錄原因。
     fn decode_all(&self, s: &mut SideState<'_>, issues: &mut Vec<Issue>) -> Option<Vec<u8>> {
         let (off, len) = self.payload;
+        // 檔案與 RGBA 緩衝：worker 在這裡配置失敗時照 C++ 版回報工具緩衝（engine::AllocStage）
+        let tool_buffers = ToolBufferStage::enter();
         let mut payload = Vec::new();
         if usize::try_from(len).ok().and_then(|n| payload.try_reserve_exact(n).ok()).is_none() {
             self.fail_resource(s, issues, "buffers for the WebP file and its RGBA output could not be allocated");
@@ -92,6 +94,7 @@ impl<'a> WebpDecoder<'a> {
             return None;
         }
         rgba.resize(rgba_len as usize, 0);
+        drop(tool_buffers);
         let res = image_webp::WebPDecoder::new(Cursor::new(vp8l_decoder_input(payload))).and_then(|mut d| {
             if d.dimensions() != (self.width, self.height) || !d.has_alpha() {
                 return Err(image_webp::DecodingError::InconsistentImageSizes);

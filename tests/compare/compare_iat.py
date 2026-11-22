@@ -50,6 +50,7 @@ ap.add_argument("--local", help="local sample config in the format of the C++ re
                                 "(cases[] and inspect_all); private files, results stay under --out")
 ap.add_argument("--pairs", help="pairs folder written by the C++ repo's tools/regress/gen_pairs.py ({P}); adds the "
                                 "derived pair cases of run_cases.py")
+ap.add_argument("--big", help="folder with big.jxl and big.webp for the Job commit limit cases (see README)")
 args = ap.parse_args()
 
 FIX = os.path.abspath(args.fixtures)
@@ -191,6 +192,29 @@ cases += [
     Case("tiff_libtiff_alloc_limit", ["inspect", SHARED, "--limits", "buffer_mib=1", "metadata_item_mib=1"]),
     Case("tiff_shared_tiles_default", ["compare", SHARED, SHARED]),
 ]
+
+# ---- Job commit limit (stage 7, D-R02 fourth revision): run_e2e.py's job_commit_limit case. C++ refuses in
+# libpng's own allocator; Rust's worker fails under the Job limit, tells the parent which side, and is rerun.
+WIDE = fx("s1_wide_rgb16_srgb.png")
+cases.append(Case("job_commit_limit", ["compare", WIDE, WIDE, "--limits", "buffer_mib=512", "job_commit_mib=24"]))
+# --big <dir>: big.jxl (4096x4096 RGB16) and big.webp (8192x8192 RGBA8) written with the C++ build's
+# gen_codec_fixture.exe (not in git); the jxlbig_allocator and webpbig_job_limit settings of run_e2e.py.
+if args.big:
+    BIGD = os.path.abspath(args.big)
+    cases += [
+        Case("big_jxl_allocator_cap", ["inspect", os.path.join(BIGD, "big.jxl"), "--limits", "job_commit_mib=128",
+                                       "--test-codec-estimate-pct", "10"]),
+        Case("big_webp_job_limit", ["inspect", os.path.join(BIGD, "big.webp"), "--limits", "job_commit_mib=384",
+                                    "--test-codec-estimate-pct", "50"]),
+        # Rust's decoders need less memory and pass the two cases above; these limits fail on both sides,
+        # so they check the report form of a side-level resource_limit.
+        Case("big_jxl_job_limit_72", ["inspect", os.path.join(BIGD, "big.jxl"), "--limits", "job_commit_mib=72",
+                                      "--test-codec-estimate-pct", "1"]),
+        Case("big_webp_job_limit_72", ["inspect", os.path.join(BIGD, "big.webp"), "--limits", "job_commit_mib=72",
+                                       "--test-codec-estimate-pct", "1"]),
+        Case("big_webp_vs_jxl_job_limit_72", ["compare", os.path.join(BIGD, "big.webp"), os.path.join(BIGD, "big.jxl"),
+                                              "--limits", "job_commit_mib=72", "--test-codec-estimate-pct", "1"]),
+    ]
 if os.path.isdir(VAR):
     v = lambda n: os.path.join(VAR, n)
     for n in sorted(os.listdir(VAR)):

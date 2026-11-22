@@ -5,12 +5,13 @@
 //! 協定是 Rust 版自己的（IMB-C 只檢查 iat-worker.exe 是否存在）：
 //! - 命令列：`--mode compare|inspect|view`、`--original <handle>`、`--output <handle>`、
 //!   `--limit name=value`、`--test-codec-estimate-pct n`、`--temp-a`／`--temp-b <handle>`、
-//!   `--temp-free <bytes>`、`--channel <handle>`、`--av1-failed original|output`、`--view-max-pixels n`。
+//!   `--temp-free <bytes>`、`--channel <handle>`、`--av1-failed original|output`、`--alloc-failed original|output`、`--view-max-pixels n`。
 //!   輸入與暫存檔都以繼承的 handle 傳入，worker 從不開啟路徑。
 //! - stdout：分析模式為一份 JSON 報告，或 `{"worker_error": …, "message": …}`；檢視模式見 [`view`]。
 //! - 通道（另一條管線）：17 bytes 一筆，[種類][u64 LE][u64 LE]。種類 1 為進度（已解出的列數，總列數）；
 //!   種類 2 為 AV1 解碼中 panic 的那一側（rav1d 的 C 介面不能 unwind，panic 會直接結束 worker，
-//!   父程序據此把那一側判為解碼錯誤後重跑，見 [`run_worker`]）。
+//!   父程序據此把那一側判為解碼錯誤後重跑，見 [`run_worker`]）；種類 3 為解碼器呼叫中配置失敗的那一側
+//!   （Job 的 commit 上限，見 `win::ALLOC_SIDE`），父程序重跑一次、把那一側照 C++ 版判為 `resource_limit`。
 
 use std::fs::File;
 use std::io::{self, Read, Write};
@@ -20,7 +21,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::{Duration, Instant};
 
-use crate::engine::{AnalysisInput, Outcome, RowLayout, ViewSink, ViewStop, analyze, decode_view_samples};
+use crate::engine::{AllocStage, AnalysisInput, Outcome, RowLayout, ViewSink, ViewStop, analyze, decode_view_samples};
 use crate::input::Input;
 use crate::limits::Limits;
 use crate::{CancelToken, Mode, Progress, Stage, win};
@@ -64,6 +65,8 @@ pub(crate) struct WorkerSettings {
     pub temp_free: u64,
     /// 已知在 rav1d 裡 panic 的一側（[original, output]）：worker 不再解碼，直接判為解碼錯誤
     pub av1_failed: [bool; 2],
+    /// 先前在解碼器呼叫中配置失敗的一側（[original, output]）：worker 不再解碼，照 C++ 版判為 `resource_limit`
+    pub alloc_failed: [Option<AllocStage>; 2],
     pub view_max_pixels: u64,
 }
 
@@ -88,6 +91,8 @@ pub(crate) struct WorkerRun<T> {
     pub wall_ms: f64,
     /// AV1 解碼中 panic 的那一側（0 original、1 output）
     pub av1_panic: Option<usize>,
+    /// 解碼器呼叫中配置失敗的那一側（0 original、1 output）與階段
+    pub alloc_failed: Option<(usize, AllocStage)>,
 }
 
 /// iat-worker.exe 的位置：和目前的執行檔同一個資料夾（C++ 版相同）。
@@ -130,6 +135,7 @@ pub(crate) fn run_worker<T: Send>(
         io_read: 0,
         wall_ms: 0.0,
         av1_panic: None,
+        alloc_failed: None,
     };
     let fail = |mut run: WorkerRun<T>, msg: String| {
         run.outcome = WorkerOutcome::LaunchFailed(msg);
@@ -170,6 +176,9 @@ pub(crate) fn run_worker<T: Send>(
         if settings.av1_failed[i] {
             args += &format!(" --av1-failed {side}");
         }
+        if let Some(stage) = settings.alloc_failed[i] {
+            args += &format!(" --alloc-failed {side}:{}", stage.code());
+        }
     }
     if settings.mode == WorkerMode::View {
         args += &format!(" --view-max-pixels {}", settings.view_max_pixels);
@@ -192,7 +201,7 @@ pub(crate) fn run_worker<T: Send>(
     };
     let deadline_at = deadline.and_then(|d| t0.checked_add(d));
     let (stdout, stderr, channel) = (&mut w.stdout, &mut w.stderr, &mut channel);
-    let (out, err, av1) = std::thread::scope(|sc| {
+    let (out, err, failed) = std::thread::scope(|sc| {
         let t_out = sc.spawn(move || read_stdout(stdout));
         let t_err = sc.spawn(move || read_capped(stderr, MAX_STDERR).0);
         let t_chan = sc.spawn(move || read_channel(channel, progress));
@@ -214,8 +223,8 @@ pub(crate) fn run_worker<T: Send>(
         }
         let out = t_out.join().ok();
         let err = t_err.join().unwrap_or_default();
-        let av1 = t_chan.join().ok().flatten();
-        (out, err, av1)
+        let failed = t_chan.join().unwrap_or_default();
+        (out, err, failed)
     });
     run.wall_ms = t0.elapsed().as_secs_f64() * 1000.0;
     run.memory_limit_signalled |= w.job.drain_notifications(20);
@@ -223,7 +232,8 @@ pub(crate) fn run_worker<T: Send>(
     (run.peak_commit, run.io_read) = w.job.accounting();
     run.stdout = out;
     run.stderr = err;
-    run.av1_panic = av1;
+    run.av1_panic = failed.av1_panic;
+    run.alloc_failed = failed.alloc_failed;
     run
 }
 
@@ -252,20 +262,30 @@ pub(crate) fn read_report_stdout(f: &mut File) -> (Vec<u8>, bool) {
     read_capped(f, MAX_STDOUT)
 }
 
-/// 讀通道直到 worker 關閉它：轉發進度，回傳 AV1 panic 的那一側。
-fn read_channel(f: &mut File, progress: &dyn Progress) -> Option<usize> {
-    let mut av1 = None;
+/// 通道回報的出事的一側（0 original、1 output）。
+#[derive(Debug, Default)]
+struct SideFailures {
+    av1_panic: Option<usize>,
+    alloc_failed: Option<(usize, AllocStage)>,
+}
+
+/// 讀通道直到 worker 關閉它：轉發進度，回傳出事的一側。
+fn read_channel(f: &mut File, progress: &dyn Progress) -> SideFailures {
+    let mut failed = SideFailures::default();
     let mut rec = [0u8; RECORD];
     while f.read_exact(&mut rec).is_ok() {
         let a = u64::from_le_bytes(rec[1..9].try_into().expect("8 bytes"));
         let b = u64::from_le_bytes(rec[9..17].try_into().expect("8 bytes"));
         match rec[0] {
             REC_PROGRESS => progress.report(Stage::Analyze, a, b),
-            REC_AV1_PANIC if a < 2 => av1 = Some(a as usize),
+            REC_AV1_PANIC if a < 2 => failed.av1_panic = Some(a as usize),
+            win::REC_ALLOC_FAILED if a < 2 => {
+                failed.alloc_failed = AllocStage::from_code(b).map(|stage| (a as usize, stage));
+            }
             _ => {}
         }
     }
-    av1
+    failed
 }
 
 // ---------------------------------------------------------------- worker 端
@@ -343,6 +363,7 @@ struct Args {
     temp_free: u64,
     channel: Option<u64>,
     av1_failed: [bool; 2],
+    alloc_failed: [Option<AllocStage>; 2],
     view_max_pixels: u64,
 }
 
@@ -356,6 +377,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         temp_free: 0,
         channel: None,
         av1_failed: [false; 2],
+        alloc_failed: [None; 2],
         view_max_pixels: u64::MAX,
     };
     let num = |v: &str| v.parse::<u64>().map_err(|_| format!("bad number: {v}"));
@@ -386,15 +408,24 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
                 }
                 a.limits.test_codec_estimate_pct = p;
             }
-            "--av1-failed" => match v.as_str() {
-                "original" => a.av1_failed[0] = true,
-                "output" => a.av1_failed[1] = true,
-                _ => return Err(format!("bad side: {v}")),
-            },
+            "--av1-failed" => a.av1_failed[side_index(v)?] = true,
+            "--alloc-failed" => {
+                let (side, stage) = v.split_once(':').ok_or_else(|| format!("bad side and stage: {v}"))?;
+                let stage = AllocStage::from_code(num(stage)?).ok_or_else(|| format!("bad stage: {v}"))?;
+                a.alloc_failed[side_index(side)?] = Some(stage);
+            }
             _ => return Err(format!("unknown argument: {k}")),
         }
     }
     Ok(a)
+}
+
+fn side_index(v: &str) -> Result<usize, String> {
+    match v {
+        "original" => Ok(0),
+        "output" => Ok(1),
+        _ => Err(format!("bad side: {v}")),
+    }
 }
 
 fn worker_error(kind: &str, message: &str) -> Vec<u8> {
@@ -442,6 +473,8 @@ pub fn worker_main(argv: &[String]) -> i32 {
             return 2;
         }
     };
+    // CHANNEL 從不清空：配置器用的 handle 值存活到程序結束
+    win::set_alloc_failure_channel(&channel);
     *CHANNEL.lock().expect("channel lock poisoned") = Some(channel);
     let result = panic::catch_unwind(AssertUnwindSafe(|| run_mode(&a, &original, output.as_ref(), &temp, &mut out)));
     let code = match result {
@@ -493,6 +526,7 @@ fn run_mode(
         progress: &progress,
         deadline: far,
         av1_failed: a.av1_failed,
+        alloc_failed: a.alloc_failed,
     };
     let report = match analyze(&input) {
         Outcome::Done(r) => r,

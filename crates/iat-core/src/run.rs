@@ -303,16 +303,22 @@ pub fn run_analysis(req: &RunRequest, cancel: &CancelToken, progress: &dyn Progr
             limits: req.limits,
             temp_free: temp.free_bytes,
             av1_failed: [false; 2],
+            alloc_failed: [None; 2],
             view_max_pixels: 0,
         };
         let deadline = Duration::from_secs(req.limits.deadline_s);
         let wf = WorkerFiles { original: orig, output: out_file, temp: [ta, tb] };
-        // rav1d 的 panic 會讓 worker 直接結束：把那一側記下來重跑，該側判為解碼錯誤（每側最多一次）。
+        // rav1d 的 panic 與解碼器呼叫中的配置失敗（Job 上限）會讓 worker 直接結束：把那一側記下來
+        // 重跑，rav1d 那一側判為解碼錯誤、配置失敗那一側照 C++ 版判為 resource_limit（每側各最多一次）。
         let w = loop {
             let w = run_worker(&settings, wf, cancel, Some(deadline), progress, read_report_stdout);
-            match w.av1_panic {
-                Some(side) if w.outcome == WorkerOutcome::Exited && !settings.av1_failed[side] => {
-                    settings.av1_failed[side] = true;
+            if w.outcome != WorkerOutcome::Exited {
+                break w;
+            }
+            match (w.av1_panic, w.alloc_failed) {
+                (Some(side), _) if !settings.av1_failed[side] => settings.av1_failed[side] = true,
+                (_, Some((side, stage))) if settings.alloc_failed[side].is_none() => {
+                    settings.alloc_failed[side] = Some(stage);
                 }
                 _ => break w,
             }

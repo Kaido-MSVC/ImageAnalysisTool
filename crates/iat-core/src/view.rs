@@ -161,6 +161,7 @@ fn view_in_worker(
         limits: *limits,
         temp_free: free,
         av1_failed: [false; 2],
+        alloc_failed: [None; 2],
         view_max_pixels: max_pixels,
     };
     let w = run_worker(
